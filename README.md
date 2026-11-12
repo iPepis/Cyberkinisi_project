@@ -26,6 +26,10 @@ npm run sample       # write sample STL files to ./samples without a browser
 - **Downloads.** One STL per part, the assembled arm, a settings file, and a zip with print notes. Parts are already oriented for printing.
 - **Checks before export.** Hard limits block the download (for example a distal end too narrow for the joint); soft limits warn.
 
+## Hinged fingers and cable tunnel
+
+Every finger and the thumb are built from hinged bones: a tongue at the proximal pivot, two ears at the distal pivot, a pin hole in each (about 2 mm filament) and a square cable tunnel (about 2.4 mm at the knuckle end, tapering with the finger) on the palm side of the pin, so a pull curls the digit. The tunnel stays open between the ears and ends open at the fingertip for a knot. Entry and exit points of every tunnel are listed as `cableTunnel` in `hand-joints.json`. Finger and thumb length sliders still work. Everything scales with the finger, so the tunnel is smaller on a thin pinky.
+
 ## Sock model
 
 Inside radius at each station = `circumference / 2π + liner + (plies × mm per ply) + clearance`.
