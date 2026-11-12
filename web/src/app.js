@@ -15,6 +15,7 @@
   Object.keys(LIM).forEach(function (k) { state[k] = Math.min(LIM[k][1], Math.max(LIM[k][0], state[k])); });
   if (state.side !== 'left' && state.side !== 'right') state.side = 'right';
   if ([0, 3, 6].indexOf(state.linerMm) < 0) state.linerMm = 0;
+  if (state.design !== 'honeycomb') state.design = 'basic';
   (function () {   // keep a remembered pose inside the real range of motion
     var def = OPB.poseDefaults(), clean = {};
     Object.keys(def).forEach(function (k) {
@@ -81,6 +82,12 @@
     });
     document.querySelectorAll('[data-plies]').forEach(function (b) { b.setAttribute('aria-pressed', String(Number(b.getAttribute('data-plies')) === state.sockPlies)); });
     $('flare').checked = state.flare;
+    DESIGNS.forEach(function (d) {
+      var t = $('tab_' + d[0]), on = state.design === d[0];
+      t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1;
+      if (on) designNote.textContent = d[2];
+    });
+    $('hcCard').hidden = state.design !== 'honeycomb';
   }
   function segGroup(key, options, label) {
     var g = el('div', { class: 'seg-group', role: 'group', 'aria-label': label, 'data-seg': key });
@@ -92,20 +99,52 @@
     });
     return g;
   }
+  var folds = {};
+  try { folds = JSON.parse(localStorage.getItem('opb.fold.v1') || '{}') || {}; } catch (e) { /* storage unavailable */ }
   function card(title, color, lede, kids) {
+    var body = el('div', { class: 'card-body' }, [lede ? el('p', { class: 'lede', text: lede }) : null].concat(kids));
+    var btn = el('button', { type: 'button', class: 'fold' });
+    function show(open) {
+      body.hidden = !open; btn.textContent = open ? '\u2013' : '+';
+      btn.setAttribute('aria-expanded', String(open)); btn.setAttribute('aria-label', (open ? 'Minimize ' : 'Expand ') + title);
+      btn.title = open ? 'Minimize' : 'Expand';
+    }
+    show(folds[title] !== true);
+    btn.addEventListener('click', function () {
+      var open = body.hidden; show(open); folds[title] = !open;
+      try { localStorage.setItem('opb.fold.v1', JSON.stringify(folds)); } catch (e) { /* ignore */ }
+    });
     return el('div', { class: 'card' }, [
-      el('h2', {}, [color ? el('span', { class: 'dot', style: 'background:var(' + color + ')' }) : null, title]),
-      lede ? el('p', { class: 'lede', text: lede }) : null
-    ].concat(kids));
+      el('h2', {}, [btn, color ? el('span', { class: 'dot', style: 'background:var(' + color + ')' }) : null, title]), body
+    ]);
   }
 
   /* ------------------------------ panel ------------------------------ */
   var panel = $('panel');
-  panel.appendChild(card('Residual limb', '--c-skin', 'Measure the bare limb. The sock and liner allowance is added for you below.', [
+  var DESIGNS = [['basic', 'Basic Design', 'Smooth walls. The easiest to print and the strongest per millimetre of wall.'],
+                 ['honeycomb', 'Honeycomb', 'Socket and forearm tube are perforated with one hexagon pattern that carries on across the joint. Air passes through the wall; the walls are made thicker to pay back the removed material.']];
+  var designNote = el('p', { class: 'lede', id: 'designNote' });
+  var tabs = el('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Design' }, DESIGNS.map(function (d) {
+    return el('button', { type: 'button', role: 'tab', id: 'tab_' + d[0], 'data-design': d[0], text: d[1],
+      onclick: function () { state.design = d[0]; syncInputs(); schedule(); } });
+  }));
+  panel.appendChild(el('div', { class: 'card tabcard' }, [tabs, designNote]));
+  var hcCard = card('Honeycomb', '--c-socket', 'Hexagon holes with the flat edge up, so every roof prints as a short bridge with no supports.', [
+    slider('hcHole', 'Hole width', 'mm', 'Across the flats. Keep under 9 mm so the sock does not push through.'),
+    slider('hcStrut', 'Strut width', 'mm', 'Material between two holes. 2.4 mm or more prints solid with a 0.4 mm nozzle.'),
+    slider('hcExtra', 'Extra wall', 'mm', 'Added to the socket and tube wall to make up for the holes.')
+  ]);
+  hcCard.id = 'hcCard';
+  panel.appendChild(hcCard);
+  var flare = el('input', { type: 'checkbox', id: 'flare' });
+  flare.addEventListener('change', function () { state.flare = flare.checked; schedule(); });
+  panel.appendChild(card('Residual limb and socket', '--c-skin', 'Measure the bare limb. The sock and liner allowance is added for you below. The socket settings apply to both designs.', [
     slider('limbLength', 'Length', 'mm', 'Elbow crease to the end of the limb.'),
     slider('circProx', 'Circumference at the elbow end', 'mm'),
     slider('circMid', 'Circumference at the midpoint', 'mm'),
-    slider('circDist', 'Circumference at the distal end', 'mm')
+    slider('circDist', 'Circumference at the distal end', 'mm'),
+    slider('wall', 'Socket wall thickness', 'mm', '3.5 mm or more is recommended for daily loads.'),
+    el('label', { for: 'flare', class: 'viewopts', style: 'display:flex;gap:8px;align-items:center;cursor:pointer' }, [flare, 'Rolled, flared rim so the sock does not catch'])
   ]));
 
   var wallBar = el('div', { class: 'section-bar', id: 'wallBar', role: 'img' });
@@ -135,12 +174,6 @@
       ])
     ]));
 
-  var flare = el('input', { type: 'checkbox', id: 'flare' });
-  flare.addEventListener('change', function () { state.flare = flare.checked; schedule(); });
-  panel.appendChild(card('Socket', '--c-socket', null, [
-    slider('wall', 'Wall thickness', 'mm', '3.5 mm or more is recommended for daily loads.'),
-    el('label', { for: 'flare', class: 'viewopts', style: 'display:flex;gap:8px;align-items:center;cursor:pointer' }, [flare, 'Rolled, flared rim so the sock does not catch'])
-  ]));
   panel.appendChild(card('Forearm tube', '--c-tube', null, [
     slider('tubeLength', 'Length', 'mm', 'Joint to joint, including both couplings.'),
     slider('tubeWall', 'Wall thickness', 'mm', 'Also used for the wrist adapter.')
@@ -247,7 +280,7 @@
   $('explode').addEventListener('input', function () { state.explode = Number(this.value); applyTransforms(); if (!userZoomed) fitCamera(); invalidate(); });
   $('showLimb').addEventListener('change', function () { state.showLimb = this.checked; applyLook(); invalidate(); persist(); });
   $('cutaway').addEventListener('change', function () { state.cutaway = this.checked; applyLook(); invalidate(); persist(); });
-  $('resetView').addEventListener('click', function () { userZoomed = false; cam.theta = 0.35; cam.phi = 1.38; fitCamera(); invalidate(); });
+  $('resetView').addEventListener('click', function () { userZoomed = false; cam.theta = 0.35; cam.phi = 1.38; cam.pan = 0; fitCamera(); invalidate(); });
   $('explode').value = state.explode; $('showLimb').checked = state.showLimb; $('cutaway').checked = state.cutaway;
 
   /* ------------------------------ 3D ------------------------------ */
@@ -255,7 +288,7 @@
   var glOK = !!window.THREE;
   var renderer, scene, camera, rootGroup, clipPlane;
   var meshes = {}, ghostMeshes = {}, partKeys = {}, ghostKey = '';
-  var cam = { theta: 0.35, phi: 1.38, dist: 1000, ty: -300 };
+  var cam = { theta: 0.35, phi: 1.38, dist: 1000, ty: -300, pan: 0 };
   var userZoomed = false, dirty = false;
 
   function token(name, fallback) {
@@ -324,10 +357,11 @@
   }
 
   function pick(obj, keys) { var o = {}; keys.forEach(function (k) { o[k] = obj[k]; }); return JSON.stringify(o); }
+  // the socket, tube and wrist adapter share one outside contour, so any of these reshapes all three
+  var LIMB = ['limbLength', 'circProx', 'circMid', 'circDist', 'sockPlies', 'plyMm', 'linerMm', 'clearance'];
+  var FORE = LIMB.concat(['wall', 'flare', 'tubeLength', 'tubeWall', 'wristLength', 'design', 'hcHole', 'hcStrut', 'hcExtra']);
   var DEPS = {
-    socket: ['limbLength', 'circProx', 'circMid', 'circDist', 'sockPlies', 'plyMm', 'linerMm', 'clearance', 'wall', 'flare'],
-    tube: ['tubeLength', 'tubeWall'],
-    wrist: ['wristLength', 'tubeWall'],
+    socket: FORE, tube: FORE, wrist: FORE,
     hand: ['palmLength', 'palmWidth', 'palmThickness', 'wristWidth', 'wristThickness', 'fingerThumb', 'fingerIndex', 'fingerMiddle', 'fingerRing', 'fingerPinky', 'side']
   };
 
@@ -366,7 +400,7 @@
       else { m = new THREE.Mesh(geometryFromTris(OPB.concat(part.shells)), mats[part.name]); m.renderOrder = part.name === 'socket' ? 5 : 0; }
       meshes[part.name] = m; rootGroup.add(m);
     });
-    var gk = pick(p, DEPS.socket.filter(function (x) { return x !== 'wall' && x !== 'flare'; }));
+    var gk = pick(p, LIMB);
     if (gk !== ghostKey) {
       ghostKey = gk;
       Object.keys(ghostMeshes).forEach(function (n) { rootGroup.remove(ghostMeshes[n]); ghostMeshes[n].geometry.dispose(); });
@@ -414,8 +448,9 @@
     cam.dist = Math.max(byH, byW) * 1.1;
   }
   function placeCamera() {
-    camera.position.set(cam.dist * Math.sin(cam.phi) * Math.sin(cam.theta), cam.ty + cam.dist * Math.cos(cam.phi), cam.dist * Math.sin(cam.phi) * Math.cos(cam.theta));
-    camera.lookAt(0, cam.ty, 0);
+    var ty = cam.ty + cam.pan;
+    camera.position.set(cam.dist * Math.sin(cam.phi) * Math.sin(cam.theta), ty + cam.dist * Math.cos(cam.phi), cam.dist * Math.sin(cam.phi) * Math.cos(cam.theta));
+    camera.lookAt(0, ty, 0);
   }
   function resize() {
     if (!glOK) return;
@@ -433,13 +468,19 @@
   if (glOK) {
     var pointers = new Map(), lastPinch = 0;
     canvas.addEventListener('pointerdown', function (e) { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); lastPinch = 0; });
+    canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     canvas.addEventListener('pointerup', function (e) { pointers.delete(e.pointerId); });
     canvas.addEventListener('pointercancel', function (e) { pointers.delete(e.pointerId); });
     canvas.addEventListener('pointermove', function (e) {
       var p = pointers.get(e.pointerId); if (!p) return;
       if (pointers.size === 1) {
-        cam.theta -= (e.clientX - p.x) * 0.008;
-        cam.phi = Math.min(Math.PI - 0.25, Math.max(0.25, cam.phi - (e.clientY - p.y) * 0.008));
+        var dx = e.clientX - p.x, dy = e.clientY - p.y;
+        cam.theta -= dx * 0.008;
+        if (e.shiftKey || (e.buttons & 2)) cam.phi = Math.min(Math.PI - 0.25, Math.max(0.25, cam.phi - dy * 0.008));   // tilt
+        else {   // slide the model up or down: one screen pixel moves it one pixel at the arm's depth
+          var span = cam.pan + dy * 2 * cam.dist * Math.tan(camera.fov * Math.PI / 360) / Math.max(1, canvas.clientHeight);
+          cam.pan = Math.max(-3000, Math.min(3000, span));
+        }
       }
       p.x = e.clientX; p.y = e.clientY;
       if (pointers.size === 2) {
@@ -494,6 +535,8 @@
     stat('Socket inside, mid', f1(i.innerDia.mid), 'mm');
     stat('Socket inside, end', f1(i.innerDia.distal), 'mm');
     stat('Limb, mid', f1(i.limbDia[1]), 'mm');
+    if (i.honeycomb) stat('Open area, socket', Math.round(100 * i.honeycomb.socket) + '', '%');
+    if (i.honeycomb) stat('Open area, tube', i.honeycomb.tube == null ? 'solid' : Math.round(100 * i.honeycomb.tube) + '', i.honeycomb.tube == null ? '' : '%');
     stat('Solid volume', f1(i.volumeCm3.reduce(function (a, c) { return a + c; }, 0)), 'cm³');
     // validation
     var chip = $('statusChip');
@@ -551,12 +594,12 @@
   }
   function settingsJSON() {
     var p = {}; Object.keys(OPB.DEFAULTS).forEach(function (k) { p[k] = state[k]; });
-    return JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.1', units: 'mm', parameters: p }, null, 2);
+    return JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.2', units: 'mm', parameters: p }, null, 2);
   }
   function readme() {
     var i = current.info, p = current.params;
     var L = [
-      'OPEN PROSTHETIC BUILDER, below-elbow arm, prototype v0.0.1', '',
+      'OPEN PROSTHETIC BUILDER, below-elbow arm, prototype v0.0.2', '',
       'NOT A CERTIFIED MEDICAL DEVICE. Have a prosthetist or clinician review the socket fit and the load-bearing joints before anyone wears this.', '',
       'YOUR SETTINGS (mm)',
       '  Residual limb length: ' + p.limbLength,
@@ -569,7 +612,8 @@
       '  Palm length / width / thickness: ' + p.palmLength + ' / ' + p.palmWidth + ' / ' + p.palmThickness,
       '  Wrist width / thickness: ' + p.wristWidth + ' / ' + p.wristThickness,
       '  Finger lengths, thumb / index / middle / ring / little: ' + [p.fingerThumb, p.fingerIndex, p.fingerMiddle, p.fingerRing, p.fingerPinky].join(' / '),
-      '  Arm side: ' + p.side, '',
+      '  Arm side: ' + p.side,
+      '  Design: ' + (p.design === 'honeycomb' ? 'Honeycomb, holes ' + p.hcHole + ' mm, struts ' + p.hcStrut + ' mm, extra wall ' + p.hcExtra + ' mm, open area socket ' + Math.round(100 * i.honeycomb.socket) + '%' + (i.honeycomb.tube == null ? '' : ', tube ' + Math.round(100 * i.honeycomb.tube) + '%') : 'Basic Design (smooth walls)'), '',
       'FILES',
       '  socket.stl, tube.stl, wrist.stl, hand.stl   one file per part, each already lying in its print orientation',
       '  assembled.stl                                the whole arm in its locked pose, for checking only',
@@ -578,6 +622,7 @@
       '  hand-joints.json                             pivot, axis and real range of motion of every hand joint', '',
       'PRINT NOTES'
     ];
+    if (p.design === 'honeycomb') L.push('  Honeycomb: print upright as supplied, no supports. Use at least 4 perimeters (walls) and 3 or more top layers so the struts print solid. The roof of every hole is a short flat bridge; slow the bridge speed and cool well. Files are large (up to a few hundred thousand triangles).');
     PARTS.forEach(function (n) { L.push('  ' + PART_LABEL[n] + ': ' + OPB.PRINT_NOTES[n]); });
     L.push('', 'Suggested material: PETG for most parts, nylon or carbon-fibre nylon for the joints. Use 0.2 mm layers.');
     L.push('Overlapping shells inside each STL are intentional; any slicer merges them.', '',

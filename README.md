@@ -21,6 +21,7 @@ npm run sample       # write sample STL files to ./samples without a browser
 - **Detachable parts with one standard joint.** Socket, forearm tube, wrist adapter and hand all connect through the same three-lug bayonet (quarter turn, with a rotation stop), so parts are interchangeable.
 - **A hand that can move like a real one.** Wrist, palm, three bones in each finger and a three-segment thumb are separate rigid pieces joined at real joint positions. Each joint stops at the range of a real hand (for example knuckle -25° to 90°, middle finger joint 0° to 105°, wrist -70° to 80°). The pose panel has Relaxed, Open, Fist and Hook presets, a curl slider per digit, and every joint on its own slider. Movement is a preview; driving it comes later.
 - **Palm and per-finger sizing.** Palm length, width and thickness, wrist width and thickness, and one length slider each for the thumb, index, middle, ring and little finger.
+- **Two designs, on tabs.** *Basic Design* has smooth walls and is the easiest to print. *Honeycomb* perforates the socket and the forearm tube with one hexagon pattern (flat edge up, so every hole roof prints as a short bridge without supports). The pattern is laid over the whole arm by depth and angle, so it carries on across the joint, and the cells stay the same size while the forearm tapers. Hole width, strut width and an extra wall thickness (which pays back the removed material) are sliders. Solid bands stay at the rim, floor and joints. The wrist adapter stays solid because it is shorter than the pattern.
 - **Live 3D preview** with a cutaway through the socket, a limb-and-sock view, and a pull-apart view of the joints.
 - **Downloads.** One STL per part, the assembled arm, a settings file, and a zip with print notes. Parts are already oriented for printing.
 - **Checks before export.** Hard limits block the download (for example a distal end too narrow for the joint); soft limits warn.
@@ -31,7 +32,7 @@ Inside radius at each station = `circumference / 2π + liner + (plies × mm per 
 
 The distal gap grows by the liner and sock thickness so the limb end does not touch the floor. The defaults are 0.8 mm per ply and 1.0 mm clearance. Sock thickness varies by brand and compresses with wear, so measure your own sock and set the value under *Sock thickness per ply*.
 
-## Known limits of v0.0.1
+## Known limits of v0.0.2
 
 These are the next milestones in [docs/SPEC.md](docs/SPEC.md).
 

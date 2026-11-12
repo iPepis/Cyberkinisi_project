@@ -20,7 +20,7 @@
       </svg>
       <h1>Open Prosthetic Builder</h1>
     </div>
-    <span class="sub">Below-elbow arm, prototype v0.0.1</span>
+    <span class="sub">Below-elbow arm, prototype v0.0.2</span>
     <span class="spacer"></span>
     <span class="chip warn">Not a certified medical device</span>
   </header>
@@ -28,14 +28,14 @@
   <main class="app">
     <section class="stage-col" aria-label="3D preview">
       <div class="stage">
-        <canvas id="view" aria-label="3D preview of the prosthetic arm. Drag to rotate, scroll to zoom."></canvas>
+        <canvas id="view" aria-label="3D preview of the prosthetic arm. Drag to turn and slide up or down, shift-drag to tilt, scroll to zoom."></canvas>
         <div class="stage-tools">
           <span class="chip" id="statusChip">Checking</span>
           <span class="spacer"></span>
           <button class="btn small" id="resetView" type="button">Reset view</button>
           <a class="btn small primary" id="toExport" href="#export">Download</a>
         </div>
-        <p class="hint">Drag to rotate. Scroll or pinch to zoom.</p>
+        <p class="hint">Drag to turn and slide up or down. Shift-drag to tilt. Scroll or pinch to zoom.</p>
         <div class="msg" id="noGL" hidden>This browser could not start 3D graphics. The sliders and downloads still work.</div>
       </div>
       <div>
@@ -43,7 +43,7 @@
       </div>
       <div class="viewopts">
         <label for="explode">Pull apart
-          <input type="range" id="explode" min="0" max="70" step="1" value="0">
+          <input type="range" id="explode" min="0" max="120" step="1" value="0">
         </label>
         <label for="showLimb"><input type="checkbox" id="showLimb"> Show limb, liner and sock</label>
         <label for="cutaway"><input type="checkbox" id="cutaway"> Cutaway</label>

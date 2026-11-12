@@ -12,7 +12,7 @@ const cases = {
   'default right arm': {},
   'left arm, long limb, thick sock': { side: 'left', limbLength: 200, sockPlies: 10, linerMm: 3 },
   'short limb, no sock, flat rim': { limbLength: 70, sockPlies: 0, flare: false, circProx: 220, circMid: 205, circDist: 175 },
-  'extremes of the sliders': { tubeLength: 320, wristLength: 90, palmLength: 120, palmWidth: 110, palmThickness: 40, wristWidth: 75, wristThickness: 50, fingerThumb: 100, fingerIndex: 100, fingerMiddle: 105, fingerRing: 100, fingerPinky: 85, wall: 8, tubeWall: 8 }
+  'extremes of the sliders': { limbLength: 300, circProx: 500, circMid: 500, circDist: 460, sockPlies: 30, linerMm: 6, clearance: 6, wall: 15, tubeLength: 600, tubeWall: 11, wristLength: 200, palmLength: 170, palmWidth: 160, palmThickness: 60, wristWidth: 110, wristThickness: 80, fingerThumb: 150, fingerIndex: 150, fingerMiddle: 160, fingerRing: 150, fingerPinky: 130 }
 };
 
 for (const [label, params] of Object.entries(cases)) {
@@ -88,10 +88,69 @@ check('STL export has the right triangle count and starts on the bed', () => {
   assert.ok(Math.abs(minZ) < 1e-4, 'min z is ' + minZ);
 });
 
-check('forearm tube fits the standard 40.4 mm joint envelope', () => {
-  const b = OPB.build({});
-  const bb = OPB.bounds(OPB.concat(b.parts[1].shells));
-  assert.ok(Math.abs(bb.max[0] - 20.2) < 0.05 && Math.abs(bb.min[0] + 20.2) < 0.05);
+check('forearm: one contour, seamless at every joint and ending on the hand collar', () => {
+  [{}, { limbLength: 200, sockPlies: 10, linerMm: 6 }, { tubeLength: 300, wristLength: 80 }].forEach(params => {
+    const b = OPB.build(params), R = b.forearm, J = OPB.J;
+    assert.ok(Math.abs(R(b.parts[3].origin) - J.Ro) < 1e-6, 'must meet the hand collar radius');
+    const maxR = part => { const bb = OPB.bounds(OPB.concat(part.shells)); return Math.max(bb.max[0], bb.max[2], -bb.min[0], -bb.min[2]); };
+    assert.ok(Math.abs(maxR(b.parts[1]) - R(b.parts[1].origin)) < 0.05, 'tube starts at the socket end radius');
+    assert.ok(Math.abs(maxR(b.parts[2]) - R(b.parts[2].origin)) < 0.05, 'wrist adapter starts at the tube end radius');
+    let prev = R(b.parts[0].length);
+    for (let d = b.parts[0].length; d <= b.parts[3].origin; d += 2) {
+      const r = R(d);
+      assert.ok(r <= prev + 1e-9, 'the forearm must only narrow below the socket (d=' + d + ')');
+      assert.ok(Math.abs(r - prev) < 3, 'no steps in the outline');
+      prev = r;
+    }
+    // wall under the socket: contour never closer to the limb than the wall setting
+    for (let d = 0; d <= params.limbLength || d <= 140; d += 5) {
+      const inner = b.fit.rIn(Math.min(d, b.params.limbLength));
+      assert.ok(Math.max(R(d), inner + b.params.wall) - inner >= b.params.wall - 1e-9);
+    }
+  });
+});
+
+check('forearm: sharp taper to the wrist is flagged', () => {
+  assert.ok(OPB.validate({ circProx: 500, circMid: 500, circDist: 460, tubeLength: 45, wristLength: 30 }).warnings.some(w => /narrows sharply/.test(w)));
+  assert.ok(!OPB.validate({}).warnings.some(w => /narrows sharply/.test(w)));
+});
+
+const hcCases = { 'honeycomb default': {}, 'honeycomb long, thick sock, left': { side: 'left', limbLength: 200, sockPlies: 8, tubeLength: 300 }, 'honeycomb short and fine': { limbLength: 70, tubeLength: 60, hcHole: 4, hcStrut: 1.6 }, 'honeycomb coarse': { hcHole: 12, hcStrut: 6, hcExtra: 4 } };
+for (const [label, params] of Object.entries(hcCases)) {
+  const b = OPB.build(Object.assign({ design: 'honeycomb' }, params));
+  b.parts.forEach(part => check(label + ' / ' + part.name + ': every shell is closed and outward-facing', () => {
+    part.shells.forEach((s, i) => {
+      const c = OPB.checkClosed(s);
+      assert.ok(c.closed, 'shell ' + i + ' has ' + c.openEdges + ' unmatched edges');
+      assert.ok(OPB.volume(s) > 0, 'shell ' + i + ' has non-positive volume');
+    });
+  }));
+}
+
+check('honeycomb: holes open the wall, the walls get thicker, and the basic design is untouched', () => {
+  const hc = OPB.build({ design: 'honeycomb' }), bs = OPB.build({});
+  assert.ok(hc.info.honeycomb.socket > 0.3 && hc.info.honeycomb.socket < 0.6, 'socket open area ' + hc.info.honeycomb.socket);
+  assert.ok(hc.info.honeycomb.tube > 0.3 && hc.info.honeycomb.tube < 0.6, 'tube open area ' + hc.info.honeycomb.tube);
+  assert.strictEqual(bs.info.honeycomb, null);
+  assert.ok(hc.info.lengths.socket > bs.info.lengths.socket, 'socket floor wall grows with hcExtra');
+  const solid = OPB.build({ design: 'honeycomb', hcHole: 4, hcStrut: 6 });
+  assert.ok(OPB.validate({ design: 'honeycomb', hcHole: 11, hcStrut: 1.8 }).warnings.length >= 2);
+  assert.ok(solid.info.honeycomb.socket < hc.info.honeycomb.socket, 'smaller holes, less open area');
+  // the basic parts must not change
+  assert.deepStrictEqual(OPB.build({ design: 'basic', hcHole: 12 }).info.volumeCm3, bs.info.volumeCm3);
+});
+
+check('honeycomb: one pattern runs across socket and tube once the tube is locked on', () => {
+  const b = OPB.build({ design: 'honeycomb' });
+  const tube = b.parts[1], t = OPB.placed(b, tube, 0, 1);
+  let on = 0, tot = 0;
+  for (let i = 0; i < t.length; i += 3) {
+    const D = -t[i + 1], d = D - tube.origin;
+    if (d < 40 || d > tube.length - 25) continue;           // inside the pattern zone only
+    tot++;
+    if (Math.abs(b.lattice.field(Math.atan2(t[i + 2], t[i]), D)) < 0.03) on++;
+  }
+  assert.ok(on > 200 && on / tot > 0.1, on + ' of ' + tot + ' tube vertices lie on the shared pattern');
 });
 
 check('hand: every pose in the range of motion keeps every shell closed', () => {

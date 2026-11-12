@@ -1,5 +1,5 @@
 /*
- * Open Prosthetic Builder: parametric geometry engine (prototype v0.0.1)
+ * Open Prosthetic Builder: parametric geometry engine (prototype v0.0.2)
  *
  * Pure JavaScript, no dependencies. Runs in the browser and in Node, so the
  * same code drives the live preview, the STL export and the automated tests.
@@ -67,6 +67,10 @@
     flare: true,       // rolled, flared rim so a sock does not catch
     tubeLength: 150,
     tubeWall: 4,
+    design: 'basic',   // 'basic' = smooth walls, 'honeycomb' = perforated socket and forearm tube
+    hcHole: 6.5,       // honeycomb: hole width across the flats (mm)
+    hcStrut: 2.8,      // honeycomb: material between two holes (mm)
+    hcExtra: 1.5,      // honeycomb: extra wall thickness that pays back the removed material (mm)
     wristLength: 40,
     // palm and wrist (mm)
     palmLength: 97,        // wrist ring to knuckle line
@@ -83,27 +87,30 @@
   };
 
   const LIMITS = {
-    limbLength: [60, 220, 1],
-    circProx: [160, 380, 1],
-    circMid: [160, 380, 1],
-    circDist: [160, 340, 1],
-    sockPlies: [0, 15, 1],
-    plyMm: [0.4, 1.5, 0.05],
-    clearance: [0.5, 3, 0.1],
-    wall: [2.4, 8, 0.1],
-    tubeLength: [45, 320, 1],
-    tubeWall: [2.4, 8, 0.1],
-    wristLength: [30, 90, 1],
-    palmLength: [70, 120, 1],
-    palmWidth: [60, 110, 1],
-    palmThickness: [18, 40, 1],
-    wristWidth: [40, 75, 1],
-    wristThickness: [28, 50, 1],
-    fingerThumb: [55, 100, 1],
-    fingerIndex: [55, 100, 1],
-    fingerMiddle: [60, 105, 1],
-    fingerRing: [55, 100, 1],
-    fingerPinky: [45, 85, 1]
+    limbLength: [60, 300, 1],
+    circProx: [160, 500, 1],
+    circMid: [160, 500, 1],
+    circDist: [160, 460, 1],
+    sockPlies: [0, 30, 1],
+    plyMm: [0.4, 2, 0.05],
+    clearance: [0.5, 6, 0.1],
+    wall: [2.4, 15, 0.1],
+    tubeLength: [45, 600, 1],
+    hcHole: [4, 12, 0.5],
+    hcStrut: [1.6, 6, 0.2],
+    hcExtra: [0, 4, 0.1],
+    tubeWall: [2.4, 11, 0.1],      // above 11 the bore would close on the male stub
+    wristLength: [30, 200, 1],
+    palmLength: [70, 170, 1],
+    palmWidth: [60, 160, 1],
+    palmThickness: [18, 60, 1],
+    wristWidth: [40, 110, 1],
+    wristThickness: [28, 80, 1],
+    fingerThumb: [55, 150, 1],
+    fingerIndex: [55, 150, 1],
+    fingerMiddle: [60, 160, 1],
+    fingerRing: [55, 150, 1],
+    fingerPinky: [45, 130, 1]
   };
 
   /* ------------------------------------------------------------------ */
@@ -333,62 +340,215 @@
     return out;
   }
 
-  function buildSocket(p, fit) {
+  /* ---- Forearm contour: one outside surface shared by socket, tube and wrist adapter ---- */
+  // Monotone cubic through the points (no overshoot), with a chosen slope at the last point.
+  function pchip(xs, ys, endSlope) {
+    const n = xs.length, h = [], dl = [], m = new Array(n);
+    for (let i = 0; i < n - 1; i++) { h[i] = xs[i + 1] - xs[i]; dl[i] = (ys[i + 1] - ys[i]) / h[i]; }
+    m[0] = dl[0]; m[n - 1] = endSlope;
+    for (let i = 1; i < n - 1; i++) m[i] = dl[i - 1] * dl[i] <= 0 ? 0 : 2 * dl[i - 1] * dl[i] / (dl[i - 1] + dl[i]);
+    return function (x) {
+      let i = 0;
+      while (i < n - 2 && x > xs[i + 1]) i++;
+      const t = clamp((x - xs[i]) / h[i], 0, 1), t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h[i] * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h[i] * m[i + 1];
+    };
+  }
+
+  // Outside radius at depth d (mm from the socket rim). It follows the limb inside the socket with a
+  // muscle swell, carries on below the socket, and narrows with a gentle concave curve to the wrist,
+  // where it meets the hand's joint collar exactly. dS = socket length, T = depth of the wrist joint.
+  function forearmProfile(p, fit, dS, T) {
+    const L = p.limbLength, w = p.wall;
+    const base = function (d) { return fit.rIn(d) - fit.flare(d) + w; };       // socket outside without the rim flare
+    const r0 = base(0), r1 = base(L / 2) * 1.05, r2 = base(L) * 1.02;           // elbow end, muscle swell, end of the limb
+    const rS = Math.max(J.Ro + 3, fit.rIn(L) + 0.95 * w, r2 + Math.min(0, (r2 - r1) / (L / 2)) * (dS - L));
+    const mS = Math.min(0, (rS - r2) / (dS - L));
+    const upper = pchip([0, L / 2, L, dS], [r0, r1, r2, rS], mS);
+    return function (d) {
+      if (d <= dS) return upper(Math.max(0, d)) + fit.flare(d);
+      const span = T - dS, t = clamp((d - dS) / span, 0, 1), t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * rS + (t3 - 2 * t2 + t) * span * mS + (-2 * t3 + 3 * t2) * J.Ro;   // ends level at the wrist
+    };
+  }
+
+  /* ---- Honeycomb: one hexagon pattern laid over the whole forearm ---- */
+  // Flat-top hexagons (the flat edge faces up, so the roof of every hole prints as a short bridge and the
+  // sides slope at 30 degrees from vertical). Rows run around the arm; each row holds as many cells as fit
+  // its own radius, so the cell size stays the same while the arm tapers. Depth D is measured from the
+  // socket rim and is shared by every part, so the pattern carries on across the joints.
+  function makeLattice(p, R, totalLen) {
+    const a = p.hcHole, t = p.hcStrut, pitch = a + t;
+    const rs = pitch / 2, cw = pitch * Math.sqrt(3);
+    const nRows = Math.ceil(totalLen / rs) + 3, n = [];
+    for (let k = 0; k < nRows; k++) n.push(Math.max(6, Math.round(2 * PI * R(Math.min(k * rs, totalLen)) / cw)));
+    return {
+      open: (a / pitch) * (a / pitch),
+      // > 0 inside a hole, < 0 in material, 0 on the edge (mm from the edge). A hole is trimmed wherever
+      // two neighbours would leave less than the strut width between them.
+      field: function (phi, D) {
+        const k0 = Math.round(D / rs), Rl = R(D);
+        let d1 = 1e9, d2 = 1e9;
+        for (let k = Math.max(0, k0 - 2); k <= Math.min(nRows - 1, k0 + 2); k++) {
+          const dth = 2 * PI / n[k], off = (k & 1) ? 0.5 : 0, j0 = Math.round(phi / dth - off);
+          for (let j = j0 - 1; j <= j0 + 1; j++) {
+            let dphi = phi - (j + off) * dth;
+            dphi -= 2 * PI * Math.round(dphi / (2 * PI));
+            const dx = dphi * Rl, dy = D - k * rs;
+            const hn = Math.max(Math.abs(dy), Math.abs(0.866 * dx + 0.5 * dy), Math.abs(0.866 * dx - 0.5 * dy));
+            if (hn < d1) { d2 = d1; d1 = hn; } else if (hn < d2) d2 = hn;
+          }
+        }
+        return Math.min(a / 2 - d1, (d2 - d1 - t * 0.98) / 2);
+      }
+    };
+  }
+
+  // Perforated wall between inner(d) and outer(d) for depths d0..d1. The wall is sampled on a grid of
+  // about 1 mm in (angle, depth) and the hole outlines are interpolated between grid points (marching squares),
+  // so the holes come out smooth. Every face is shared with its neighbour, so the shell is closed.
+  // z = { d0, d1, inner, outer, origin (global depth of the part), phase (angle the part is turned when locked) }
+  function honeycombShell(lat, z) {
+    const m = Math.max(4, Math.round((z.d1 - z.d0) / 1.0)), h = (z.d1 - z.d0) / m;
+    let rmax = 0;
+    for (let j = 0; j <= m; j++) rmax = Math.max(rmax, z.outer(z.d0 + j * h));
+    const nt = Math.max(48, Math.round(2 * PI * rmax / 1.1 / 8) * 8), dth = 2 * PI / nt;
+    const margin = 1.5;                                        // solid ring where the zone meets a solid band
+    const g = new Float64Array(nt * (m + 1));
+    let holes = 0;
+    for (let j = 0; j <= m; j++) {
+      const d = z.d0 + j * h, ramp = Math.min(d - z.d0 - margin, z.d1 - margin - d);
+      for (let i = 0; i < nt; i++) {
+        const v = Math.min(lat.field(i * dth + z.phase, z.origin + d), ramp);
+        g[j * nt + i] = v; if (v > 0) holes++;
+      }
+    }
+    const pt = function (r, th, d) { return [r * Math.cos(th), -d, r * Math.sin(th)]; };
+    const out = [];
+    const tri = function (a, b, c) { out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); };
+    const quad = function (a, b, c, d) { tri(a, b, c); tri(a, c, d); };
+    const node = function (i, j) { return j * nt + (i % nt); };
+    const solid = function (i, j) { return g[node(i, j)] <= 0; };
+    // vertex pairs { i: inside point, o: outside point } at grid nodes and at hole outlines on grid edges
+    const corner = {}, hEdge = {}, vEdge = {};
+    const cornerAt = function (i, j) {
+      const k = node(i, j); if (corner[k]) return corner[k];
+      const d = z.d0 + j * h, th = (i % nt) * dth;
+      return (corner[k] = { i: pt(z.inner(d), th, d), o: pt(z.outer(d), th, d), iso: false });
+    };
+    const cross = function (ga, gb) { return clamp(ga / (ga - gb), 1e-3, 1 - 1e-3); };
+    const hAt = function (i, j) {                              // between node (i,j) and (i+1,j)
+      const k = node(i, j); if (hEdge[k]) return hEdge[k];
+      const d = z.d0 + j * h, th = ((i % nt) + cross(g[k], g[node(i + 1, j)])) * dth;
+      return (hEdge[k] = { i: pt(z.inner(d), th, d), o: pt(z.outer(d), th, d), iso: true });
+    };
+    const vAt = function (i, j) {                              // between node (i,j) and (i,j+1)
+      const k = node(i, j); if (vEdge[k]) return vEdge[k];
+      const d = z.d0 + (j + cross(g[k], g[node(i, j + 1)])) * h, th = (i % nt) * dth;
+      return (vEdge[k] = { i: pt(z.inner(d), th, d), o: pt(z.outer(d), th, d), iso: true });
+    };
+    for (let j = 0; j < m; j++) for (let i = 0; i < nt; i++) {
+      const s = [solid(i, j), solid(i + 1, j), solid(i + 1, j + 1), solid(i, j + 1)];
+      const c = [cornerAt(i, j), cornerAt(i + 1, j), cornerAt(i + 1, j + 1), cornerAt(i, j + 1)];
+      const e = [function () { return hAt(i, j); }, function () { return vAt(i + 1, j); }, function () { return hAt(i, j + 1); }, function () { return vAt(i, j); }];
+      const poly = [];
+      for (let k = 0; k < 4; k++) {
+        if (s[k]) poly.push(c[k]);
+        if (s[k] !== s[(k + 1) % 4]) poly.push(e[k]());
+      }
+      const n = poly.length;
+      if (n < 3) continue;
+      let cen = null;
+      if (n > 4) {                                             // centre point for the five or six sided pieces
+        const ci = [0, 0, 0], co = [0, 0, 0];
+        poly.forEach(function (q) { for (let a = 0; a < 3; a++) { ci[a] += q.i[a] / n; co[a] += q.o[a] / n; } });
+        cen = { i: ci, o: co };
+      }
+      for (let k = 1; k < (cen ? n + 1 : n - 1); k++) {
+        const A = cen || poly[0], B = cen ? poly[k - 1] : poly[k], C = cen ? poly[k % n] : poly[k + 1];
+        tri(A.o, B.o, C.o);                                    // outside face
+        tri(A.i, C.i, B.i);                                    // inside face
+      }
+      for (let k = 0; k < n; k++) {                            // wall of the hole
+        const P = poly[k], Q = poly[(k + 1) % n];
+        if (P.iso && Q.iso) quad(P.i, Q.i, Q.o, P.o);
+      }
+    }
+    for (let i = 0; i < nt; i++) {                             // flat end faces, where the zone meets the solid bands
+      const A = cornerAt(i, 0), B = cornerAt(i + 1, 0), C = cornerAt(i + 1, m), D = cornerAt(i, m);
+      quad(A.i, B.i, B.o, A.o);
+      quad(D.i, D.o, C.o, C.i);
+    }
+    return { shell: new Float32Array(out), open: holes / (nt * (m + 1)) };
+  }
+
+  function buildSocket(p, fit, R, dS, lat) {
     const w = p.wall, L = p.limbLength;
     const yf = L + fit.distalGap;                   // inner floor depth
-    const yo = yf + w;                              // outer floor depth (collar starts here)
     const rd = fit.rIn(L);
     const rf = clamp(rd - (J.Ro + 1.5), 2, 10);
     const dArc = yf - rf;                           // where the distal fillet starts
     const rArc = fit.rIn(dArc);
     const cR = rArc - rf, cD = dArc;                // fillet centre
     const N = 56;
-    const prof = [];
-    const rcRim = (fit.rIn(0) + fit.rIn(0) + w) / 2;
-    const inner = [], outer = [];
-    for (let i = 0; i <= N; i++) {
-      const d = dArc * i / N;
-      inner.push([fit.rIn(d), d]);
-      outer.push([fit.rIn(d) + w, d]);
-    }
-    prof.push.apply(prof, inner);
+    const outer = function (d) { return Math.max(R(d), d <= L ? fit.rIn(d) + w : 0); };   // never thinner than the wall
+    const innerTo = function (d0, d1, n) { const a = []; for (let i = 0; i <= n; i++) { const d = d0 + (d1 - d0) * i / n; a.push([fit.rIn(d), d]); } return a; };
+    const outerUp = function (dFrom, dTo, n) { const a = []; for (let i = 0; i <= n; i++) { const d = dFrom + (dTo - dFrom) * i / n; a.push([outer(d), d]); } return a; };
+    const fillet = [];
     for (let s = 1; s <= 10; s++) {                 // inner fillet, 0..90 degrees
       const ph = (90 * s / 10) * DEG;
-      prof.push([cR + rf * Math.cos(ph), cD + rf * Math.sin(ph)]);
+      fillet.push([cR + rf * Math.cos(ph), cD + rf * Math.sin(ph)]);
     }
-    prof.push([0, yf]);
-    prof.push([0, yo + J.ceiling]);
-    prof.push([J.Rl, yo + J.ceiling]);
-    prof.push([J.Rl, yo + J.collarH]);
-    prof.push([J.Ro, yo + J.collarH]);
-    prof.push([J.Ro, yo]);
-    prof.push([cR, yo]);
-    for (let s = 9; s >= 0; s--) {                  // outer fillet, 90..0 degrees
-      const ph = (90 * s / 10) * DEG;
-      prof.push([cR + (rf + w) * Math.cos(ph), cD + (rf + w) * Math.sin(ph)]);
+    const tail = [[0, yf], [0, dS - J.cavity], [J.Rl, dS - J.cavity], [J.Rl, dS]];   // solid below the floor, joint cavity opens at the end face
+    const hw = (outer(0) - fit.rIn(0)) / 2, rcRim = fit.rIn(0) + hw;
+    const roll = [];
+    for (let s = 1; s < 12; s++) { const ph = PI * s / 12; roll.push([rcRim + hw * Math.cos(ph), -hw * Math.sin(ph)]); }   // rolled rim over the top
+    const Da = 14, Db = dArc - 3;                   // honeycomb zone: below the rim band, above the floor fillet
+    let shells, open = null;
+    if (lat && Db - Da >= 12) {
+      const hc = honeycombShell(lat, { d0: Da, d1: Db, inner: fit.rIn, outer: outer, origin: 0, phase: 0 });
+      open = hc.open;
+      shells = [
+        revolve(innerTo(0, Da, 12).concat(outerUp(Da, 0, 12), roll), 0, 2 * PI, 96),
+        hc.shell,
+        revolve(innerTo(Db, dArc, 12).concat(fillet, tail, outerUp(dS, Db, N)), 0, 2 * PI, 96)
+      ];
+    } else {
+      shells = [revolve(innerTo(0, dArc, N).concat(fillet, tail, outerUp(dS, 0, N), roll), 0, 2 * PI, 96)];
     }
-    for (let i = N - 1; i >= 0; i--) prof.push(outer[i]);
-    for (let s = 1; s < 12; s++) {                  // rolled rim over the top
-      const ph = PI * s / 12;
-      prof.push([rcRim + (w / 2) * Math.cos(ph), -(w / 2) * Math.sin(ph)]);
-    }
-    const length = yo + J.collarH;
-    const shells = [revolve(prof, 0, 2 * PI, 96)].concat(ledgeShells(length));
-    return { name: 'socket', shells: shells, length: length, male: false, rimDepth: length };
+    shells = shells.concat(ledgeShells(dS));
+    return { name: 'socket', shells: shells, length: dS, male: false, rimDepth: dS, hcOpen: open };
   }
 
-  // Forearm tube and wrist adapter share one design: male stub on the proximal end,
-  // female collar on the distal end, hollow in between.
-  function buildTube(name, L, wall) {
-    const Rb = J.Ro - wall;
-    const prof = [
-      [J.Rmi, -J.stubLen], [J.Rm, -J.stubLen], [J.Rm, 0], [J.Ro, 0],
-      [J.Ro, L], [J.Rl, L], [J.Rl, L - J.cavity],
-      [0, L - J.cavity], [0, L - J.collarH],
-      [Rb, L - J.collarH], [Rb, J.shoulder], [J.Rmi, J.shoulder]
-    ];
-    const shells = [revolve(prof, 0, 2 * PI, 72)].concat(lugShells(), ledgeShells(L));
-    return { name: name, shells: shells, length: L, male: true, rimDepth: L };
+  // Forearm tube and wrist adapter share one design: male stub on the proximal end, female collar on the
+  // distal end, outside following the shared forearm contour, hollow in between.
+  function buildTube(name, L, wall, origin, R, lat, index) {
+    const out = function (d) { return R(origin + d); };
+    // the inside opens at 45 degrees from the stub so the roof prints without supports
+    const bore = function (d) { return Math.min(out(d) - wall, J.Rmi + (d - J.shoulder)); };
+    const N = 40, d0 = L - J.collarH;
+    const outerRun = function (dFrom, dTo, n) { const a = []; for (let i = 0; i <= n; i++) { const d = dFrom + (dTo - dFrom) * i / n; a.push([out(d), d]); } return a; };
+    const boreRun = function (dFrom, dTo, n) { const a = []; for (let i = 0; i <= n; i++) { const d = dFrom + (dTo - dFrom) * i / n; a.push([bore(d), d]); } return a; };
+    const stub = [[J.Rmi, -J.stubLen], [J.Rm, -J.stubLen], [J.Rm, 0]];
+    const collar = [[J.Rl, L], [J.Rl, L - J.cavity], [0, L - J.cavity], [0, d0]];
+    let Da = 12;                                    // honeycomb starts once the 45 degree funnel has met the wall
+    while (Da < L && J.Rmi + (Da - J.shoulder) < out(Da) - wall) Da++;
+    Da += 2;
+    const Db = d0 - 4;
+    let shells, open = null;
+    if (lat && Db - Da >= 12) {
+      const hc = honeycombShell(lat, { d0: Da, d1: Db, inner: bore, outer: out, origin: origin, phase: index * J.lock * DEG });
+      open = hc.open;
+      shells = [
+        revolve(stub.concat(outerRun(0, Da, 12), boreRun(Da, J.shoulder, N)), 0, 2 * PI, 96),
+        hc.shell,
+        revolve(outerRun(Db, L, N).concat(collar, boreRun(d0, Db, N)), 0, 2 * PI, 96)
+      ];
+    } else {
+      shells = [revolve(stub.concat(outerRun(0, L, N), collar, boreRun(d0, J.shoulder, N)), 0, 2 * PI, 96)];
+    }
+    shells = shells.concat(lugShells(), ledgeShells(L));
+    return { name: name, shells: shells, length: L, male: true, rimDepth: L, hcOpen: open };
   }
 
   /* ------------------------------------------------------------------ */
@@ -620,27 +780,35 @@
   function build(params) {
     const p = Object.assign({}, DEFAULTS, params || {});
     const fit = fitModel(p);
-    const socket = buildSocket(p, fit);
-    const tube = buildTube('tube', p.tubeLength, p.tubeWall);
-    const wrist = buildTube('wrist', p.wristLength, p.tubeWall);
+    const hc = p.design === 'honeycomb';
+    // Honeycomb makes every wall thicker by hcExtra so the removed material is paid back.
+    const pe = hc ? Object.assign({}, p, { wall: p.wall + p.hcExtra, tubeWall: Math.min(11, p.tubeWall + p.hcExtra) }) : p;
+    const dS = p.limbLength + fit.distalGap + pe.wall + J.collarH;      // socket length, known before it is built
+    const total = dS + p.tubeLength + p.wristLength;
+    const R = forearmProfile(pe, fit, dS, total);
+    const lat = hc ? makeLattice(p, R, total + 200) : null;
+    const socket = buildSocket(pe, fit, R, dS, lat);
+    const tube = buildTube('tube', p.tubeLength, pe.tubeWall, dS, R, lat, 1);
+    const wrist = buildTube('wrist', p.wristLength, pe.tubeWall, dS + p.tubeLength, R, null, 2);   // shorter than the pattern needs, stays solid
     const hand = buildHand(p);
     const parts = [socket, tube, wrist, hand];
     let o = 0;
     parts.forEach(function (pt, i) { pt.origin = o; pt.index = i; o += pt.length; });
-    const info = summarize(p, fit, parts);
-    return { params: p, fit: fit, parts: parts, info: info, totalLength: o };
+    const info = summarize(p, fit, parts, R);
+    return { params: p, fit: fit, parts: parts, info: info, totalLength: o, forearm: R, lattice: lat };
   }
 
-  function summarize(p, fit, parts) {
+  function summarize(p, fit, parts, R) {
     const L = p.limbLength;
     const dia = function (d) { return 2 * (fit.rIn(d)); };
     return {
       sockMm: fit.sockMm, layers: fit.layers, allowance: fit.allowance,
       limbDia: [p.circProx, p.circMid, p.circDist].map(function (c) { return c / PI; }),
       innerDia: { rim: dia(0) - 2 * fit.flare(0), mid: dia(L / 2), distal: dia(L) },
-      outerDia: { rim: dia(0) - 2 * fit.flare(0) + 2 * p.wall, distal: dia(L) + 2 * p.wall },
+      outerDia: { rim: 2 * (R(0) - fit.flare(0)), distal: 2 * R(parts[0].length) },
       lengths: { socket: parts[0].length, tube: parts[1].length, wrist: parts[2].length, hand: parts[3].length },
       total: parts.reduce(function (a, b) { return a + b.length; }, 0),
+      honeycomb: p.design === 'honeycomb' ? { socket: parts[0].hcOpen, tube: parts[1].hcOpen } : null,
       volumeCm3: parts.map(function (pt) { return pt.shells.reduce(function (a, s) { return a + volume(s); }, 0) / 1000; })
     };
   }
@@ -668,6 +836,15 @@
       warnings.push('Sock and liner add ' + fit.layers.toFixed(1) + ' mm on each side. That is a lot of volume change; confirm fit with a clinician.');
     if (p.sockPlies > 0 && p.clearance < 0.8)
       warnings.push('With a sock, a clearance under 0.8 mm can make the socket tight once the sock is wet or bunched.');
+    const dS = L + fit.distalGap + p.wall + J.collarH;
+    const taper = (forearmProfile(p, fit, dS, dS + p.tubeLength + p.wristLength)(dS) - J.Ro) / (p.tubeLength + p.wristLength);
+    if (taper > 0.45)
+      warnings.push('The forearm narrows sharply from the socket to the wrist. Lengthen the tube or wrist adapter for a natural shape.');
+    if (p.design === 'honeycomb') {
+      if (p.hcHole > 9) warnings.push('Honeycomb holes over 9 mm let the sock or skin push through. Use smaller holes against the skin.');
+      if (p.hcStrut < 2.4) warnings.push('Honeycomb struts under 2.4 mm are thin for a 0.4 mm nozzle and for daily loads.');
+      if (p.hcHole / (p.hcHole + p.hcStrut) > 0.72) warnings.push('More than half of the wall is open. Add strut width or extra wall.');
+    }
     if (p.wristWidth > p.palmWidth)
       warnings.push('The wrist is wider than the palm. Check the palm and wrist widths.');
     if (p.fingerMiddle < p.fingerIndex - 1 || p.fingerMiddle < p.fingerRing - 1)
