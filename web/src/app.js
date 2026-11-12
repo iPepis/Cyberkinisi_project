@@ -632,7 +632,7 @@
       'KNOWN LIMITS OF THIS PROTOTYPE',
       '  The joint has no spring detent or safety pin yet, so it can turn back. Do not rely on it to carry load until the joint tests in docs/SPEC.md (milestone M0) pass.',
       '  Strap mounts and the suspension cuff are not modelled yet.',
-      '  hand.stl is one rigid piece in the relaxed pose. Each finger bone has hinge ears, a tongue, a 2.2 mm pin hole (about 2 mm filament) and a square cable tunnel (about 2.4 mm) that ends open at the fingertip for a knot. The palm has no matching knuckle hinge or cable channel yet, and joint collision is not checked.');
+      '  hand.stl is one rigid piece in the relaxed pose. The hand is built from movable segments, but hinges, pin holes and tendon channels are not designed yet.');
     return L.join('\n');
   }
   function makeZip() {

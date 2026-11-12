@@ -670,7 +670,7 @@
       note: 'Hand frame: palm faces +z, fingers point along -y, millimetres. Rotate each segment about its pivot along the axis; positive flexion bends toward the palm. Apply parents first.',
       segments: hand.segments.map(function (sg) {
         return {
-          id: sg.id, parent: sg.parent < 0 ? null : hand.segments[sg.parent].id, pivot: sg.pivot, cableTunnel: sg.cable || null,
+          id: sg.id, parent: sg.parent < 0 ? null : hand.segments[sg.parent].id, pivot: sg.pivot,
           joints: sg.dofs.map(function (d) {
             const r = HAND_ROM[d.key];
             return { name: d.key, axis: d.axis, sign: d.sign, minDeg: r.min, maxDeg: r.max, relaxedDeg: r.def };
@@ -680,53 +680,21 @@
     };
   }
 
-  function clipHalf(poly, ax, az, c) {              // convex polygon, keep ax*x + az*z <= c
-    const out = [];
-    for (let i = 0; i < poly.length; i++) {
-      const p = poly[i], q = poly[(i + 1) % poly.length];
-      const dp = ax * p[0] + az * p[1] - c, dq = ax * q[0] + az * q[1] - c;
-      if (dp <= 0) out.push(p);
-      if (dp * dq < 0) { const k = dp / (dp - dq); out.push([p[0] + k * (q[0] - p[0]), p[1] + k * (q[1] - p[1])]); }
-    }
-    return out;
-  }
-
-  // A hinged digit (pin axis along x, palm side +z). Every bone has a tongue at its proximal pivot and, except the tip,
-  // two ears at its distal pivot, each with a pin hole. A square tunnel for the cable runs through every body on the
-  // palm side of the pin, so a pull curls the digit, and stays open between the ears. The tip ends flat with the
-  // tunnel open, so the cable is knotted there. `cable` is the tunnel entry and exit of each bone, hand frame.
-  function digitHinged(w, t, lens, tip) {
-    const U = superEllipse(w, t, 2.4, 20);
-    const rc = 0.08 * t, zc = 0.31 * t, rh = 0.07 * t, Rd = 0.16 * t, zp = 0.04 * t, xg = 0.2 * w, xo = 0.4 * w, CL = 0.35;
-    const body = [[1, 0, -rc], [-1, 0, -rc], [0, 1, zc - rc], [0, -1, -(zc + rc)]].map(function (c) { return clipHalf(U, c[0], c[1], c[2]); });
-    const total = lens.reduce(function (a, b) { return a + b; }, 0);
-    const sAt = function (u) { return 1 - (1 - tip) * u / total; };
-    const sc = function (P, s) { return P.map(function (q) { return [q[0] * s, q[1] * s]; }); };
-    const box = function (x0, x1, z0, z1, y0, y1) { return prism([[x0, z0], [x1, z0], [x1, z1], [x0, z1]], y0, y1); };
-    const ring = function (cx, cy, cz, R, r, half) {  // pin boss, axis x
-      return translate(rotZ(revolve([[r, -half], [R, -half], [R, half], [r, half]], 0, 2 * PI, 20), PI / 2), cx, cy, cz);
-    };
+  // A straight digit: tapered segments with a round knuckle at each joint and a round tip.
+  function digitStraight(w, t, lens, tip) {
     const segs = [];
+    const total = lens.reduce(function (a, b) { return a + b; }, 0);
     let y = 0, used = 0;
     for (let i = 0; i < lens.length; i++) {
-      const l = lens[i], s0 = sAt(used), s1 = sAt(used + l), last = i === lens.length - 1;
-      const sy = function (d) { return s0 + (s1 - s0) * d / l; };            // scale at distance d from this bone's pivot
-      const neck = Math.min(0.34 * t * s0, 0.3 * l), neckE = Math.min(0.34 * t * s1, 0.3 * l);
-      const ya = -neck, yb = last ? -l : -(l - neckE);
-      const shells = body.map(function (P) { return loft([{ pts: sc(P, sy(neck)), y: y + ya }, { pts: sc(P, sy(l - (last ? 0 : neckE))), y: y + yb }]); });
-      // tongue (fits the ears of the bone before it)
-      const xt = xg * s0 - CL;
-      shells.push(box(-xt, xt, (zp - Rd) * s0, (zp + Rd) * s0, y - neck, y - rh * s0));
-      shells.push(ring(0, y, zp * s0, Rd * s0, rh * s0, xt));
-      if (!last) {
-        [-1, 1].forEach(function (sg) {
-          const x0 = xg * s1, x1 = xo * s1, cx = sg * (x0 + x1) / 2;
-          shells.push(box(sg > 0 ? x0 : -x1, sg > 0 ? x1 : -x0, (zp - Rd) * s1, (zp + Rd) * s1, y - l + rh * s1, y - l + neckE));
-          shells.push(ring(cx, y - l, zp * s1, Rd * s1, rh * s1, (x1 - x0) / 2));
-        });
-      }
-      segs.push({ shells: shells, start: [0, y, zp * s0], cable: [[0, y - neck, zc * sy(neck)], [0, y - (last ? l : l - neckE), zc * sy(last ? l : l - neckE)]] });
-      y -= l; used += l;
+      const s0 = 1 - (1 - tip) * used / total, s1 = 1 - (1 - tip) * (used + lens[i]) / total;
+      const shells = [loft([
+        { pts: superEllipse(w * s0, t * s0, 2.4, 20), y: y },
+        { pts: superEllipse(w * s1, t * s1, 2.4, 20), y: y - lens[i] }
+      ])];
+      if (i === 0) shells.push(ellipsoid(w * s0 / 2, t * s0 / 2 * 1.05, t * s0 / 2 * 1.05, 0, y, 0));
+      shells.push(ellipsoid(w * s1 / 2, t * s1 / 2 * 1.05, t * s1 / 2 * 1.05, 0, y - lens[i], 0));
+      segs.push({ shells: shells, start: [0, y, 0] });
+      y -= lens[i]; used += lens[i];
     }
     return segs;
   }
@@ -764,7 +732,7 @@
       const r = L / DEFAULTS['finger' + name.charAt(0).toUpperCase() + name.slice(1)];
       const fw = slotW * clamp(0.5 + 0.5 * r, 0.7, 1.0), ft = ft0 * clamp(0.5 + 0.5 * r, 0.7, 1.25);
       const x = thumbSign * (span / 2 - slotW / 2) - thumbSign * k * (slotW + gap), y = -(dK - offs[name]);
-      const segs = digitHinged(fw, ft, [0.47 * L, 0.28 * L, 0.25 * L], 0.78);
+      const segs = digitStraight(fw, ft, [0.47 * L, 0.28 * L, 0.25 * L], 0.78);
       const keys = [
         [{ key: name + '_spread', axis: Z, sign: thumbSign }, { key: name + '_mcp', axis: FLEX0, sign: 1 }],
         [{ key: name + '_pip', axis: FLEX0, sign: 1 }],
@@ -772,9 +740,8 @@
       ];
       let parent = palmIdx;
       segs.forEach(function (sg, i) {
-        parent = add(name + ['_prox', '_mid', '_dist'][i], parent, [x + sg.start[0], y + sg.start[1], sg.start[2]], keys[i],
+        parent = add(name + ['_prox', '_mid', '_dist'][i], parent, [x + sg.start[0], y + sg.start[1], 0], keys[i],
           sg.shells.map(function (sh) { return translate(sh, x, y, 0); }));
-        segments[parent].cable = sg.cable.map(function (c) { return [c[0] + x, c[1] + y, c[2]]; });
       });
     });
 
@@ -782,7 +749,7 @@
     {
       const L = p.fingerThumb, r = L / DEFAULTS.fingerThumb, phi = thumbSign * 32 * DEG;
       const tw = 0.215 * pw * clamp(0.5 + 0.5 * r, 0.7, 1.15), tt = 0.64 * pt * clamp(0.5 + 0.5 * r, 0.7, 1.25);
-      const segs = digitHinged(tw, tt, [0.295 * L, 0.386 * L, 0.318 * L], 0.82);
+      const segs = digitStraight(tw, tt, [0.295 * L, 0.386 * L, 0.318 * L], 0.82);
       const bx = thumbSign * 0.39 * pw, by = -(d0 + 0.67 * pl), bz = 0.2 * pt;
       const FA = [-Math.cos(phi), -Math.sin(phi), 0];                  // flexion axis of the angled thumb
       const keys = [
@@ -794,10 +761,9 @@
       segs.forEach(function (sg, i) {
         const c = Math.cos(phi), s = Math.sin(phi);
         const st = sg.start;                                           // rotate the start point about z, then move
-        const at = function (q) { return [q[0] * c - q[1] * s + bx, q[0] * s + q[1] * c + by, q[2] + bz]; };
-        parent = add('thumb' + ['_meta', '_prox', '_dist'][i], parent, at(st), keys[i],
+        const pv = [st[0] * c - st[1] * s + bx, st[0] * s + st[1] * c + by, bz];
+        parent = add('thumb' + ['_meta', '_prox', '_dist'][i], parent, pv, keys[i],
           sg.shells.map(function (sh) { return translate(rotZ(sh, phi), bx, by, bz); }));
-        segments[parent].cable = sg.cable.map(at);
       });
     }
 
