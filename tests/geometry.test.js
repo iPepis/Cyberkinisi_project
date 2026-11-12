@@ -201,6 +201,39 @@ check('hand: each finger length slider changes only that finger', () => {
   ['index', 'middle', 'pinky', 'thumb'].forEach(n => assert.ok(Math.abs(ext(c, n) - ext(a, n)) < 1e-3, n + ' changed'));
 });
 
+check('hand: every digit has an open cable tunnel and open pin holes (and the probe does hit solid)', () => {
+  // ray cast along +x (slightly tilted); odd number of hits = inside that shell
+  const inside = (sh, p) => {
+    const d = [1, 0.0013, 0.0007]; let n = 0;
+    for (let i = 0; i < sh.length; i += 9) {
+      const v = k => [sh[i + 3 * k], sh[i + 3 * k + 1], sh[i + 3 * k + 2]];
+      const [a, b, c] = [v(0), v(1), v(2)];
+      const e1 = b.map((x, k) => x - a[k]), e2 = c.map((x, k) => x - a[k]);
+      const cr = (u, w) => [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+      const dot = (u, w) => u[0] * w[0] + u[1] * w[1] + u[2] * w[2];
+      const h = cr(d, e2), det = dot(e1, h); if (Math.abs(det) < 1e-12) continue;
+      const sv = p.map((x, k) => x - a[k]), u = dot(sv, h) / det; if (u < 0 || u > 1) continue;
+      const q = cr(sv, e1), w = dot(d, q) / det; if (w < 0 || u + w > 1) continue;
+      if (dot(e2, q) / det > 0) n++;
+    }
+    return n % 2 === 1;
+  };
+  const hand = OPB.build({}).parts[3].hand;
+  const solid = (seg, p) => seg.shells.some(sh => inside(sh, p));
+  hand.segments.filter(sg => sg.cable).forEach(sg => {
+    const [a, b] = sg.cable;
+    for (let k = 0; k <= 4; k++) {
+      const p = a.map((x, i) => x + (b[i] - x) * k / 4);
+      assert.ok(!solid(sg, p), sg.id + ' tunnel blocked at ' + k + '/4');
+    }
+    const mid = a.map((x, i) => (x + b[i]) / 2);
+    assert.ok(solid(sg, [mid[0], mid[1], mid[2] - 4]) , sg.id + ' probe found no wall dorsal to the tunnel');
+    assert.ok(!solid(sg, [mid[0], mid[1], mid[2] + 6]), sg.id + ' wall palmar to the tunnel is missing or the probe is wrong');
+  });
+  // pin hole: empty at the pivot of every bone that has a tongue
+  hand.segments.filter(sg => sg.cable).forEach(sg => assert.ok(!solid(sg, sg.pivot), sg.id + ' pin hole blocked'));
+});
+
 check('hand: palm sliders change the palm and nothing else', () => {
   const a = OPB.build({}), c = OPB.build({ palmWidth: 100 });
   const bb = b => OPB.bounds(OPB.concat(b.parts[3].hand.segments.find(s => s.id === 'palm').shells));
