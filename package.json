@@ -1,0 +1,12 @@
+{
+  "name": "open-prosthetic-builder",
+  "version": "0.0.1",
+  "description": "Customize and download a 3D-printable below-elbow prosthetic arm in the browser.",
+  "private": true,
+  "scripts": {
+    "test": "node tests/geometry.test.js",
+    "serve": "python3 -m http.server 8080 --directory web",
+    "build": "node tools/build-single.js",
+    "sample": "node tools/export-sample.js samples"
+  }
+}

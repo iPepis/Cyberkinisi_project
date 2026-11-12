@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Open Prosthetic Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!--body-start-->
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <rect x="9" y="2" width="10" height="7" rx="2" stroke="currentColor" stroke-width="2"/>
+        <rect x="10" y="11" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/>
+        <path d="M14 21v5M10 26h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <h1>Open Prosthetic Builder</h1>
+    </div>
+    <span class="sub">Below-elbow arm, prototype v0.0.1</span>
+    <span class="spacer"></span>
+    <span class="chip warn">Not a certified medical device</span>
+  </header>
+
+  <main class="app">
+    <section class="stage-col" aria-label="3D preview">
+      <div class="stage">
+        <canvas id="view" aria-label="3D preview of the prosthetic arm. Drag to rotate, scroll to zoom."></canvas>
+        <div class="stage-tools">
+          <span class="chip" id="statusChip">Checking</span>
+          <span class="spacer"></span>
+          <button class="btn small" id="resetView" type="button">Reset view</button>
+          <a class="btn small primary" id="toExport" href="#export">Download</a>
+        </div>
+        <p class="hint">Drag to rotate. Scroll or pinch to zoom.</p>
+        <div class="msg" id="noGL" hidden>This browser could not start 3D graphics. The sliders and downloads still work.</div>
+      </div>
+      <div>
+        <div class="lenbar" id="lenbar" aria-label="Length of each part"></div>
+      </div>
+      <div class="viewopts">
+        <label for="explode">Pull apart
+          <input type="range" id="explode" min="0" max="70" step="1" value="0">
+        </label>
+        <label for="showLimb"><input type="checkbox" id="showLimb"> Show limb, liner and sock</label>
+        <label for="cutaway"><input type="checkbox" id="cutaway"> Cutaway</label>
+      </div>
+    </section>
+
+    <section class="panel" id="panel" aria-label="Measurements and options"></section>
+  </main>
+
+  <footer class="foot">
+    <span>Open source. Designs are shared for the community to test and improve.</span>
+    <span>Fit and load-bearing parts must be reviewed by a prosthetist or clinician before real-world use.</span>
+  </footer>
+</div>
+<!--body-end-->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="src/geometry.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>
