@@ -15,5 +15,5 @@ fs.mkdirSync(dir, { recursive: true });
 b.parts.forEach(p => fs.writeFileSync(path.join(dir, p.name + '.stl'), Buffer.from(OPB.toSTL(OPB.concat(p.shells), p.name))));
 const all = b.parts.map(p => OPB.placed(b, p, 0, 1));
 fs.writeFileSync(path.join(dir, 'assembled.stl'), Buffer.from(OPB.toSTL(OPB.concat(all), 'assembled')));
-fs.writeFileSync(path.join(dir, 'parameters.json'), JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.2', units: 'mm', parameters: b.params }, null, 2));
+fs.writeFileSync(path.join(dir, 'parameters.json'), JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.3', units: 'mm', parameters: b.params }, null, 2));
 console.log('wrote 4 parts + assembled.stl to', dir, '| total length', b.info.total.toFixed(0), 'mm');

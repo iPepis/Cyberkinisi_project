@@ -122,15 +122,15 @@
   /* ------------------------------ panel ------------------------------ */
   var panel = $('panel');
   var DESIGNS = [['basic', 'Basic Design', 'Smooth walls. The easiest to print and the strongest per millimetre of wall.'],
-                 ['honeycomb', 'Honeycomb', 'Socket and forearm tube are perforated with one hexagon pattern that carries on across the joint. Air passes through the wall; the walls are made thicker to pay back the removed material.']];
+                 ['honeycomb', 'Honeycomb', 'Socket and forearm tube are perforated with one irregular web of cells that carries on across the joint. Air passes through the wall; the walls are made thicker to pay back the removed material.']];
   var designNote = el('p', { class: 'lede', id: 'designNote' });
   var tabs = el('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Design' }, DESIGNS.map(function (d) {
     return el('button', { type: 'button', role: 'tab', id: 'tab_' + d[0], 'data-design': d[0], text: d[1],
       onclick: function () { state.design = d[0]; syncInputs(); schedule(); } });
   }));
   panel.appendChild(el('div', { class: 'card tabcard' }, [tabs, designNote]));
-  var hcCard = card('Honeycomb', '--c-socket', 'Hexagon holes with the flat edge up, so every roof prints as a short bridge with no supports.', [
-    slider('hcHole', 'Hole width', 'mm', 'Across the flats. Keep under 9 mm so the sock does not push through.'),
+  var hcCard = card('Honeycomb', '--c-socket', 'Organic cells with rounded corners and an even strut. Small cells keep every roof short enough to bridge.', [
+    slider('hcHole', 'Hole width', 'mm', 'Average cell width. Keep under 9 mm so the sock does not push through.'),
     slider('hcStrut', 'Strut width', 'mm', 'Material between two holes. 2.4 mm or more prints solid with a 0.4 mm nozzle.'),
     slider('hcExtra', 'Extra wall', 'mm', 'Added to the socket and tube wall to make up for the holes.')
   ]);
@@ -594,12 +594,12 @@
   }
   function settingsJSON() {
     var p = {}; Object.keys(OPB.DEFAULTS).forEach(function (k) { p[k] = state[k]; });
-    return JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.2', units: 'mm', parameters: p }, null, 2);
+    return JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.3', units: 'mm', parameters: p }, null, 2);
   }
   function readme() {
     var i = current.info, p = current.params;
     var L = [
-      'OPEN PROSTHETIC BUILDER, below-elbow arm, prototype v0.0.2', '',
+      'OPEN PROSTHETIC BUILDER, below-elbow arm, prototype v0.0.3', '',
       'NOT A CERTIFIED MEDICAL DEVICE. Have a prosthetist or clinician review the socket fit and the load-bearing joints before anyone wears this.', '',
       'YOUR SETTINGS (mm)',
       '  Residual limb length: ' + p.limbLength,
@@ -622,7 +622,7 @@
       '  hand-joints.json                             pivot, axis and real range of motion of every hand joint', '',
       'PRINT NOTES'
     ];
-    if (p.design === 'honeycomb') L.push('  Honeycomb: print upright as supplied, no supports. Use at least 4 perimeters (walls) and 3 or more top layers so the struts print solid. The roof of every hole is a short flat bridge; slow the bridge speed and cool well. Files are large (up to a few hundred thousand triangles).');
+    if (p.design === 'honeycomb') L.push('  Honeycomb: print upright as supplied. Cells are small enough to bridge, so supports should not be needed; check the preview in your slicer. Use at least 4 perimeters (walls) and 3 or more top layers so the struts print solid. Hole roofs are short bridges of different angles; slow the bridge speed and cool well. Files are large (up to a few hundred thousand triangles).');
     PARTS.forEach(function (n) { L.push('  ' + PART_LABEL[n] + ': ' + OPB.PRINT_NOTES[n]); });
     L.push('', 'Suggested material: PETG for most parts, nylon or carbon-fibre nylon for the joints. Use 0.2 mm layers.');
     L.push('Overlapping shells inside each STL are intentional; any slicer merges them.', '',

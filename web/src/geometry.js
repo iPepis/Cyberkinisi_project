@@ -1,5 +1,5 @@
 /*
- * Open Prosthetic Builder: parametric geometry engine (prototype v0.0.2)
+ * Open Prosthetic Builder: parametric geometry engine (prototype v0.0.3)
  *
  * Pure JavaScript, no dependencies. Runs in the browser and in Node, so the
  * same code drives the live preview, the STL export and the automated tests.
@@ -68,8 +68,8 @@
     tubeLength: 150,
     tubeWall: 4,
     design: 'basic',   // 'basic' = smooth walls, 'honeycomb' = perforated socket and forearm tube
-    hcHole: 6.5,       // honeycomb: hole width across the flats (mm)
-    hcStrut: 2.8,      // honeycomb: material between two holes (mm)
+    hcHole: 7,         // honeycomb: average hole width (mm)
+    hcStrut: 2.6,      // honeycomb: material between two holes (mm)
     hcExtra: 1.5,      // honeycomb: extra wall thickness that pays back the removed material (mm)
     wristLength: 40,
     // palm and wrist (mm)
@@ -372,34 +372,40 @@
     };
   }
 
-  /* ---- Honeycomb: one hexagon pattern laid over the whole forearm ---- */
-  // Flat-top hexagons (the flat edge faces up, so the roof of every hole prints as a short bridge and the
-  // sides slope at 30 degrees from vertical). Rows run around the arm; each row holds as many cells as fit
-  // its own radius, so the cell size stays the same while the arm tapers. Depth D is measured from the
-  // socket rim and is shared by every part, so the pattern carries on across the joints.
+  /* ---- Honeycomb: one irregular cell pattern (a Voronoi web) laid over the whole forearm ---- */
+  // Seed points sit in rows around the arm, each row holding as many seeds as fit its own radius, and every
+  // seed is nudged by a fixed pseudo-random amount. The wall is material wherever two seeds are almost
+  // equally near, so the cells come out as irregular polygons with rounded corners and an even strut width,
+  // and the cell size stays the same while the arm tapers. Depth D is measured from the socket rim and is
+  // shared by every part, so the pattern carries on across the joints.
   function makeLattice(p, R, totalLen) {
     const a = p.hcHole, t = p.hcStrut, pitch = a + t;
-    const rs = pitch / 2, cw = pitch * Math.sqrt(3);
-    const nRows = Math.ceil(totalLen / rs) + 3, n = [];
-    for (let k = 0; k < nRows; k++) n.push(Math.max(6, Math.round(2 * PI * R(Math.min(k * rs, totalLen)) / cw)));
+    const rs = pitch * 0.866, nRows = Math.ceil(totalLen / rs) + 3, n = [];
+    for (let k = 0; k < nRows; k++) n.push(Math.max(6, Math.round(2 * PI * R(Math.min(k * rs, totalLen)) / pitch)));
+    const rnd = function (k, j, salt) {                          // fixed value in [-0.5, 0.5) for a seed
+      let x = (Math.imul(k + 1, 374761393) ^ Math.imul(j + 7, 668265263) ^ Math.imul(salt, 2147483647)) >>> 0;
+      x = Math.imul(x ^ (x >>> 13), 1274126177) >>> 0;
+      return ((x ^ (x >>> 16)) >>> 0) / 4294967296 - 0.5;
+    };
+    const jit = 0.7;                                             // how far a seed may wander, in pitches
     return {
-      open: (a / pitch) * (a / pitch),
-      // > 0 inside a hole, < 0 in material, 0 on the edge (mm from the edge). A hole is trimmed wherever
-      // two neighbours would leave less than the strut width between them.
+      // > 0 inside a hole, < 0 in material, 0 on the edge (a little under the mm from the edge). The strut
+      // is at least hcStrut wide everywhere and a little wider where three cells meet.
       field: function (phi, D) {
         const k0 = Math.round(D / rs), Rl = R(D);
         let d1 = 1e9, d2 = 1e9;
         for (let k = Math.max(0, k0 - 2); k <= Math.min(nRows - 1, k0 + 2); k++) {
-          const dth = 2 * PI / n[k], off = (k & 1) ? 0.5 : 0, j0 = Math.round(phi / dth - off);
+          const nk = n[k], dth = 2 * PI / nk, off = (k & 1) ? 0.5 : 0, j0 = Math.round(phi / dth - off);
           for (let j = j0 - 1; j <= j0 + 1; j++) {
-            let dphi = phi - (j + off) * dth;
+            const jw = ((j % nk) + nk) % nk;
+            let dphi = phi - (j + off + jit * rnd(k, jw, 1)) * dth;
             dphi -= 2 * PI * Math.round(dphi / (2 * PI));
-            const dx = dphi * Rl, dy = D - k * rs;
-            const hn = Math.max(Math.abs(dy), Math.abs(0.866 * dx + 0.5 * dy), Math.abs(0.866 * dx - 0.5 * dy));
-            if (hn < d1) { d2 = d1; d1 = hn; } else if (hn < d2) d2 = hn;
+            const dx = dphi * Rl, dy = D - (k + jit * rnd(k, jw, 2)) * rs;
+            const dd = Math.sqrt(dx * dx + dy * dy);
+            if (dd < d1) { d2 = d1; d1 = dd; } else if (dd < d2) d2 = dd;
           }
         }
-        return Math.min(a / 2 - d1, (d2 - d1 - t * 0.98) / 2);
+        return (d2 - d1 - t) / 2;
       }
     };
   }
@@ -841,9 +847,9 @@
     if (taper > 0.45)
       warnings.push('The forearm narrows sharply from the socket to the wrist. Lengthen the tube or wrist adapter for a natural shape.');
     if (p.design === 'honeycomb') {
-      if (p.hcHole > 9) warnings.push('Honeycomb holes over 9 mm let the sock or skin push through. Use smaller holes against the skin.');
+      if (p.hcHole > 9) warnings.push('Honeycomb cells over 9 mm let the sock or skin push through. Use smaller holes against the skin.');
       if (p.hcStrut < 2.4) warnings.push('Honeycomb struts under 2.4 mm are thin for a 0.4 mm nozzle and for daily loads.');
-      if (p.hcHole / (p.hcHole + p.hcStrut) > 0.72) warnings.push('More than half of the wall is open. Add strut width or extra wall.');
+      if (p.hcHole / (p.hcHole + p.hcStrut) > 0.78) warnings.push('More than half of the wall is open. Add strut width or extra wall.');
     }
     if (p.wristWidth > p.palmWidth)
       warnings.push('The wrist is wider than the palm. Check the palm and wrist widths.');
