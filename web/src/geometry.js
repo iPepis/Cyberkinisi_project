@@ -1,5 +1,5 @@
 /*
- * Open Prosthetic Builder: parametric geometry engine (prototype v0.0.3)
+ * Open Prosthetic Builder: parametric geometry engine (prototype v0.0.4)
  *
  * Pure JavaScript, no dependencies. Runs in the browser and in Node, so the
  * same code drives the live preview, the STL export and the automated tests.
@@ -71,19 +71,7 @@
     hcHole: 7,         // honeycomb: average hole width (mm)
     hcStrut: 2.6,      // honeycomb: material between two holes (mm)
     hcExtra: 1.5,      // honeycomb: extra wall thickness that pays back the removed material (mm)
-    wristLength: 40,
-    // palm and wrist (mm)
-    palmLength: 97,        // wrist ring to knuckle line
-    palmWidth: 83,         // across the knuckles
-    palmThickness: 26,
-    wristWidth: 56,
-    wristThickness: 36,
-    // one length per digit (mm, straight)
-    fingerThumb: 79,
-    fingerIndex: 77,
-    fingerMiddle: 83,
-    fingerRing: 79,
-    fingerPinky: 65
+    wristLength: 40
   };
 
   const LIMITS = {
@@ -100,17 +88,7 @@
     hcStrut: [1.6, 6, 0.2],
     hcExtra: [0, 4, 0.1],
     tubeWall: [2.4, 11, 0.1],      // above 11 the bore would close on the male stub
-    wristLength: [30, 200, 1],
-    palmLength: [70, 170, 1],
-    palmWidth: [60, 160, 1],
-    palmThickness: [18, 60, 1],
-    wristWidth: [40, 110, 1],
-    wristThickness: [28, 80, 1],
-    fingerThumb: [55, 150, 1],
-    fingerIndex: [55, 150, 1],
-    fingerMiddle: [60, 160, 1],
-    fingerRing: [55, 150, 1],
-    fingerPinky: [45, 130, 1]
+    wristLength: [30, 200, 1]
   };
 
   /* ------------------------------------------------------------------ */
@@ -206,18 +184,6 @@
     return pts;
   }
 
-  /* ---- organic shapes (used by the hand) ---- */
-  // Smooth convex outline in the XZ plane. n = 2 is an ellipse; larger n squares the corners.
-  function superEllipse(w, t, n, N) {
-    N = N || 28;
-    const pts = [];
-    for (let k = 0; k < N; k++) {
-      const a = 2 * PI * k / N, c = Math.cos(a), s = Math.sin(a);
-      pts.push([(w / 2) * Math.sign(c) * Math.pow(Math.abs(c), 2 / n), (t / 2) * Math.sign(s) * Math.pow(Math.abs(s), 2 / n)]);
-    }
-    return pts;
-  }
-
   // Closed shell through a stack of convex outlines that share one point count.
   // rings: [{ pts: [[x, z], ...], y }, ...]
   function loft(rings) {
@@ -241,39 +207,12 @@
     return s;
   }
 
-  function scaleXYZ(tris, sx, sy, sz) {
-    const o = new Float32Array(tris.length);
-    for (let i = 0; i < tris.length; i += 3) { o[i] = tris[i] * sx; o[i + 1] = tris[i + 1] * sy; o[i + 2] = tris[i + 2] * sz; }
-    return o;
-  }
-  function rotX(tris, a) {
-    const c = Math.cos(a), s = Math.sin(a), o = new Float32Array(tris.length);
-    for (let i = 0; i < tris.length; i += 3) {
-      const y = tris[i + 1], z = tris[i + 2];
-      o[i] = tris[i]; o[i + 1] = y * c - z * s; o[i + 2] = y * s + z * c;
-    }
-    return o;
-  }
-  function ellipsoid(rx, ry, rz, cx, cy, cz) {
-    const prof = [];
-    for (let s = 0; s <= 10; s++) { const a = -PI / 2 + PI * s / 10; prof.push([Math.cos(a), Math.sin(a)]); }
-    return translate(scaleXYZ(revolve(prof, 0, 2 * PI, 20), rx, ry, rz), cx, cy, cz);
-  }
-
   /* ---- transforms (return new arrays) ---- */
   function rotAxis(tris, a) {       // add `a` radians to the revolve angle
     const c = Math.cos(a), s = Math.sin(a), o = new Float32Array(tris.length);
     for (let i = 0; i < tris.length; i += 3) {
       const x = tris[i], z = tris[i + 2];
       o[i] = x * c - z * s; o[i + 1] = tris[i + 1]; o[i + 2] = x * s + z * c;
-    }
-    return o;
-  }
-  function rotZ(tris, a) {
-    const c = Math.cos(a), s = Math.sin(a), o = new Float32Array(tris.length);
-    for (let i = 0; i < tris.length; i += 3) {
-      const x = tris[i], y = tris[i + 1];
-      o[i] = x * c - y * s; o[i + 1] = x * s + y * c; o[i + 2] = tris[i + 2];
     }
     return o;
   }
@@ -558,33 +497,31 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Hand: rigid segments joined by joints with human ranges of motion   */
+  /* Hand: imported palm and fingers, joined at their hinge pins         */
   /* ------------------------------------------------------------------ */
-  // Hand frame (before the part is turned into the arm): palm faces +z, fingers point along -y.
-  // Positive flexion bends a digit toward the palm. Positive side angles move toward the thumb.
+  // The palm (a hollow gauntlet) and the finger bones come from "Hand" by BQEducacion
+  // (Thingiverse thing:1095104, CC BY-SA). Their triangles are used exactly as published: this file
+  // only moves them. tools/import_hand.py finds the hinge-pin holes and writes web/assets/hand/hand-rig.json,
+  // which holds the rigid transform of every part and the pivot of every joint.
+  //
+  // Hand frame (before the part is turned for the arm): wrist opening at depth HAND_RIM, fingers point
+  // along -y (world y = -depth), +z is the palm side, millimetres. Positive flexion bends a finger toward +z.
+  // Each finger and the thumb have two joints, as printed: the knuckle (proximal bone about the palm pin)
+  // and the tip joint (distal bone about the pin at the end of the proximal bone). The thumb sits on the
+  // opposite wall of the palm and bends toward the fingers (-z). The printed link bars are not placed;
+  // see README.md.
   const FINGERS = ['index', 'middle', 'ring', 'pinky'];
-  const DIGITS = ['thumb'].concat(FINGERS);
+  const DIGITS = FINGERS.concat(['thumb']);
   const HAND_ROM = {};
   function rom(key, label, group, min, max, def) { HAND_ROM[key] = { label: label, group: group, min: min, max: max, def: def }; }
-  rom('wrist_flex', 'Wrist, back to palm side', 'wrist', -70, 80, 0);
-  rom('wrist_dev', 'Wrist, side to side', 'wrist', -30, 20, 0);
-  (function () {
-    const spreadMax = { index: 20, middle: 10, ring: 15, pinky: 25 };
-    const spreadDef = { index: 4, middle: 0, ring: -3, pinky: -8 };
-    const mcpDef = { index: 11, middle: 14, ring: 15, pinky: 18 };
-    const pipDef = { index: 19, middle: 24, ring: 26, pinky: 31 };
-    const dipDef = { index: 13, middle: 16, ring: 18, pinky: 21 };
-    FINGERS.forEach(function (f) {
-      rom(f + '_spread', 'Side to side', f, -spreadMax[f], spreadMax[f], spreadDef[f]);
-      rom(f + '_mcp', 'Knuckle', f, -25, 90, mcpDef[f]);
-      rom(f + '_pip', 'Middle joint', f, 0, 105, pipDef[f]);
-      rom(f + '_dip', 'Tip joint', f, -10, 85, dipDef[f]);
-    });
-    rom('thumb_abd', 'Spread away from palm edge', 'thumb', -20, 40, 0);
-    rom('thumb_opp', 'Swing across palm', 'thumb', -20, 45, 8);
-    rom('thumb_mcp', 'Middle joint', 'thumb', -10, 60, 14);
-    rom('thumb_ip', 'Tip joint', 'thumb', -15, 80, 20);
-  })();
+  FINGERS.forEach(function (f) {
+    rom(f + '_mcp', 'Knuckle', f, 0, 90, 12);
+    rom(f + '_pip', 'Fingertip joint', f, 0, 100, 10);   // the parts touch at about 104 degrees
+  });
+  rom('thumb_mcp', 'Thumb base joint', 'thumb', 0, 90, 10);
+  rom('thumb_pip', 'Thumb tip joint', 'thumb', 0, 100, 10);
+  const CURL_KEYS = {};
+  DIGITS.forEach(function (f) { CURL_KEYS[f] = [f + '_mcp', f + '_pip']; });
 
   function poseDefaults() {
     const o = {};
@@ -595,13 +532,12 @@
     const o = poseDefaults();
     const set = function (k, v) { o[k] = v; };
     if (name === 'open') {
-      FINGERS.forEach(function (f) { set(f + '_mcp', 0); set(f + '_pip', 0); set(f + '_dip', 0); });
-      set('thumb_abd', 25); set('thumb_opp', 0); set('thumb_mcp', 0); set('thumb_ip', 0);
+      DIGITS.forEach(function (f) { set(f + '_mcp', 0); set(f + '_pip', 0); });
     } else if (name === 'fist') {
-      FINGERS.forEach(function (f) { set(f + '_mcp', 85); set(f + '_pip', 100); set(f + '_dip', 70); set(f + '_spread', 0); });
-      set('thumb_abd', 0); set('thumb_opp', 35); set('thumb_mcp', 40); set('thumb_ip', 45);
+      FINGERS.forEach(function (f) { set(f + '_mcp', 85); set(f + '_pip', 95); });
+      set('thumb_mcp', 0); set('thumb_pip', 0);      // a bent thumb would hit the curled fingers
     } else if (name === 'hook') {
-      FINGERS.forEach(function (f) { set(f + '_mcp', 8); set(f + '_pip', 90); set(f + '_dip', 55); set(f + '_spread', 0); });
+      FINGERS.forEach(function (f) { set(f + '_mcp', 8); set(f + '_pip', 85); });
     }
     return o;
   }
@@ -634,6 +570,11 @@
     const c = Math.cos(a), s = Math.sin(a);
     return [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1];
   }
+  function m4det3(M) {
+    return M[0] * (M[5] * M[10] - M[6] * M[9]) - M[1] * (M[4] * M[10] - M[6] * M[8]) + M[2] * (M[4] * M[9] - M[5] * M[8]);
+  }
+  // Applies a rigid transform. A mirroring transform would turn the surface inside out, so its
+  // triangles get their winding reversed.
   function m4apply(tris, M) {
     const o = new Float32Array(tris.length);
     for (let i = 0; i < tris.length; i += 3) {
@@ -641,6 +582,10 @@
       o[i] = M[0] * x + M[1] * y + M[2] * z + M[3];
       o[i + 1] = M[4] * x + M[5] * y + M[6] * z + M[7];
       o[i + 2] = M[8] * x + M[9] * y + M[10] * z + M[11];
+    }
+    if (m4det3(M) < 0) {
+      for (let i = 0; i < o.length; i += 9)
+        for (let k = 0; k < 3; k++) { const t = o[i + 3 + k]; o[i + 3 + k] = o[i + 6 + k]; o[i + 6 + k] = t; }
     }
     return o;
   }
@@ -663,7 +608,7 @@
   /* Hand shells in the part frame (turned for the arm), in a given pose. */
   function handShells(hand, pose) {
     const P = handMatrices(hand, pose), pre = m4rotY(hand.pre);
-    const out = hand.base.slice();
+    const out = hand.base.map(function (sh) { return sh; });
     hand.segments.forEach(function (sg, i) {
       const M = m4mul(pre, P[i]);
       sg.shells.forEach(function (sh) { out.push(m4apply(sh, M)); });
@@ -673,7 +618,7 @@
 
   function jointTable(hand) {
     return {
-      note: 'Hand frame: palm faces +z, fingers point along -y, millimetres. Rotate each segment about its pivot along the axis; positive flexion bends toward the palm. Apply parents first.',
+      note: 'Hand frame: palm side is +z, fingers point along -y, millimetres, wrist opening at y = ' + (-hand.rim).toFixed(2) + '. Rotate each segment about its pivot along the axis; positive flexion bends toward the palm. Apply parents first. The imported palm and finger bones are the unchanged Thingiverse meshes.',
       segments: hand.segments.map(function (sg) {
         return {
           id: sg.id, parent: sg.parent < 0 ? null : hand.segments[sg.parent].id, pivot: sg.pivot,
@@ -686,98 +631,157 @@
     };
   }
 
-  // A straight digit: tapered segments with a round knuckle at each joint and a round tip.
-  function digitStraight(w, t, lens, tip) {
-    const segs = [];
-    const total = lens.reduce(function (a, b) { return a + b; }, 0);
-    let y = 0, used = 0;
-    for (let i = 0; i < lens.length; i++) {
-      const s0 = 1 - (1 - tip) * used / total, s1 = 1 - (1 - tip) * (used + lens[i]) / total;
-      const shells = [loft([
-        { pts: superEllipse(w * s0, t * s0, 2.4, 20), y: y },
-        { pts: superEllipse(w * s1, t * s1, 2.4, 20), y: y - lens[i] }
-      ])];
-      if (i === 0) shells.push(ellipsoid(w * s0 / 2, t * s0 / 2 * 1.05, t * s0 / 2 * 1.05, 0, y, 0));
-      shells.push(ellipsoid(w * s1 / 2, t * s1 / 2 * 1.05, t * s1 / 2 * 1.05, 0, y - lens[i], 0));
-      segs.push({ shells: shells, start: [0, y, 0] });
-      y -= lens[i]; used += lens[i];
+  /* ---- imported meshes ---- */
+  const ASSET_FILES = ['palm.stl', 'links.stl', 'thumb_prox.stl', 'thumb_dist.stl'];
+  FINGERS.forEach(function (f) { ASSET_FILES.push('finger_' + f + '_prox.stl', 'finger_' + f + '_dist.stl'); });
+  let HAND_ASSETS = null;           // { rig, bytes: {file: Uint8Array}, tris: {file: Float32Array} }
+  const handCache = {};
+
+  // Binary STL to a list of triangles (9 floats each). The normals in the file are not used.
+  function parseSTL(buf) {
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const n = dv.getUint32(80, true);
+    if (84 + 50 * n !== u8.byteLength) throw new Error('not a binary STL');
+    const o = new Float32Array(n * 9);
+    for (let i = 0; i < n; i++)
+      for (let k = 0; k < 9; k++) o[i * 9 + k] = dv.getFloat32(84 + 50 * i + 12 + 4 * k, true);
+    return o;
+  }
+
+  // rig: the parsed hand-rig.json. files: { 'palm.stl': ArrayBuffer | Uint8Array, ... } (see ASSET_FILES).
+  function setHandAssets(rig, files) {
+    const bytes = {}, tris = {};
+    ASSET_FILES.forEach(function (name) {
+      if (!files[name]) throw new Error('missing hand file ' + name);
+      bytes[name] = files[name] instanceof Uint8Array ? files[name] : new Uint8Array(files[name]);
+    });
+    HAND_ASSETS = { rig: rig, bytes: bytes, tris: tris };
+    Object.keys(handCache).forEach(function (k) { delete handCache[k]; });
+  }
+  function handReady() { return !!HAND_ASSETS; }
+  function handFile(name) {         // the original file bytes, for the download
+    if (!HAND_ASSETS) throw new Error('hand files are not loaded');
+    return HAND_ASSETS.bytes[name];
+  }
+  function handTris(name) {
+    if (!HAND_ASSETS) throw new Error('hand files are not loaded');
+    if (!HAND_ASSETS.tris[name]) HAND_ASSETS.tris[name] = parseSTL(HAND_ASSETS.bytes[name]);
+    return HAND_ASSETS.tris[name];
+  }
+
+  // The same triangles reflected across x = cx (for the left hand). Winding is reversed to keep the surface outward.
+  function mirrorSTL(bytes, cx) {
+    const out = new Uint8Array(bytes), dv = new DataView(out.buffer);
+    const n = dv.getUint32(80, true);
+    for (let i = 0; i < n; i++) {
+      const o = 84 + 50 * i;
+      dv.setFloat32(o, -dv.getFloat32(o, true), true);                       // normal x
+      for (let v = 0; v < 3; v++) dv.setFloat32(o + 12 + 12 * v, cx - dv.getFloat32(o + 12 + 12 * v, true), true);
+      for (let k = 0; k < 12; k++) {                                          // swap vertex 1 and 2
+        const t = out[o + 24 + k]; out[o + 24 + k] = out[o + 36 + k]; out[o + 36 + k] = t;
+      }
     }
-    return segs;
+    return out;
+  }
+  // The published parts exactly as they were imported: file name to bytes. The left palm is the mirror of the right.
+  function handPrintFiles(side) {
+    if (!HAND_ASSETS) throw new Error('hand files are not loaded');
+    const out = {};
+    ASSET_FILES.forEach(function (n) {
+      out[n] = n === 'palm.stl' && side === 'left' ? mirrorSTL(HAND_ASSETS.bytes[n], HAND_ASSETS.rig.mirrorX) : HAND_ASSETS.bytes[n];
+    });
+    return out;
+  }
+  const HAND_ATTRIBUTION = [
+    'Palm, finger bones, link bars and thumb bones in this folder',
+    '',
+    '  "Hand" by BQEducacion (author page: http://www.soniaverdu.es/)',
+    '  https://www.thingiverse.com/thing:1095104',
+    '  Licence: Creative Commons Attribution-ShareAlike (CC BY-SA), as listed on the Thingiverse page.',
+    '',
+    'The triangles are the author\'s, split into separate files and nothing else. The left palm is the right palm reflected.',
+    'Anything you build from them must keep this credit and be shared under the same licence.',
+    'Original parts list and assembly notes: the Thingiverse page above.'
+  ].join('\n');
+
+  // Wrist adapter plate: a neck from the standard collar flares into a saddle that sits under the
+  // palm's wrist opening. Radius of a convex outline (centre at the origin) along each angle.
+  const ADAPTER = { neck: 22, plate: 5, margin: 2.5, ring: 48 };
+  function outlineAtAngles(hull, n, margin) {
+    const out = [];
+    for (let k = 0; k < n; k++) {
+      const a = 2 * PI * k / n, dx = Math.cos(a), dz = Math.sin(a);
+      let best = 0;
+      for (let i = 0; i < hull.length; i++) {            // ray from the origin against each hull edge
+        const p = hull[i], q = hull[(i + 1) % hull.length];
+        const ex = q[0] - p[0], ez = q[1] - p[1];
+        const den = dx * ez - dz * ex;
+        if (Math.abs(den) < 1e-12) continue;
+        const t = (p[0] * ez - p[1] * ex) / den, u = (p[0] * dz - p[1] * dx) / den;
+        if (t > 0 && u >= -1e-9 && u <= 1 + 1e-9) best = Math.max(best, t);
+      }
+      out.push([dx * (best + margin), dz * (best + margin)]);
+    }
+    return out;
   }
 
   function buildHand(p) {
-    const thumbSign = p.side === 'right' ? -1 : 1;   // viewed from the front, palm forward
-    const d0 = J.shoulder - 1;                       // geometry starts just inside the shoulder
-    const pl = p.palmLength, pw = p.palmWidth, pt = p.palmThickness, ww = p.wristWidth, wt = p.wristThickness;
-    const dK = d0 + pl, dW = d0 + 16;                // knuckle line and wrist pivot depths
-    const ring = function (w, t, n, d) { return { pts: superEllipse(w, t, n, 28), y: -d }; };
-    const Z = [0, 0, 1], FLEX0 = [-1, 0, 0];         // flexion axis of a digit pointing along -y
+    if (!HAND_ASSETS) throw new Error('The hand files are not loaded. Call OPB.setHandAssets() first.');
+    if (handCache[p.side]) return handCache[p.side];
+    const side = HAND_ASSETS.rig.sides[p.side];
+    // the rig is centred on the wrist opening; hull points are (x, z) about its centre
+    const hull = side.rimHull;
+    let cx = 0, cz = 0;
+    hull.forEach(function (h) { cx += h[0]; cz += h[1]; });
+    cx /= hull.length; cz /= hull.length;
+    const centred = hull.map(function (h) { return [h[0] - cx, h[1] - cz]; });
+    const d0 = J.shoulder - 1;
+    const rim = J.shoulder + ADAPTER.neck + ADAPTER.plate;        // depth of the palm's wrist opening
+    const toPart = function (M) { const o = M.slice(); o[7] -= rim; return o; };   // y = -depth
+    const pivot = function (v) { return [v[0], v[1] - rim, v[2]]; };
+
+    const outline = outlineAtAngles(centred, ADAPTER.ring, ADAPTER.margin);
+    const circle = outline.map(function (q, k) {
+      const a = 2 * PI * k / ADAPTER.ring;
+      return [(J.Ro - 0.6) * Math.cos(a), (J.Ro - 0.6) * Math.sin(a)];
+    });
+    const shift = function (pts) { return pts.map(function (q) { return [q[0] + cx, q[1] + cz]; }); };
+    const plate = loft([
+      { pts: circle, y: -d0 },
+      { pts: shift(outline), y: -(J.shoulder + ADAPTER.neck) },
+      { pts: shift(outline), y: -rim }
+    ]);
+    const base = [revolve([[J.Rmi, -J.stubLen], [J.Rm, -J.stubLen], [J.Rm, 0], [J.Ro, 0], [J.Ro, J.shoulder], [J.Rmi, J.shoulder]], 0, 2 * PI, 72), plate]
+      .concat(lugShells());
+
     const segments = [];
-    const add = function (id, parent, pivot, dofs, shells) {
-      segments.push({ id: id, parent: parent, pivot: pivot, dofs: dofs, shells: shells });
+    const add = function (id, parent, pv, dofs, shells) {
+      segments.push({ id: id, parent: parent, pivot: pv, dofs: dofs, shells: shells });
       return segments.length - 1;
     };
-
-    const wristIdx = add('wrist', -1, null, [], [
-      loft([ring(2 * J.Ro - 1, 2 * J.Ro - 1, 2, d0), ring(ww, wt, 2.4, dW)]),
-      ellipsoid(ww / 2 * 0.97, wt * 0.35, wt / 2 * 0.97, 0, -dW, 0)
-    ]);
-    const palmIdx = add('palm', wristIdx, [0, -dW, 0],
-      [{ key: 'wrist_dev', axis: Z, sign: thumbSign }, { key: 'wrist_flex', axis: FLEX0, sign: 1 }],
-      [loft([
-        ring(ww, wt, 2.4, dW),
-        ring(ww + (pw - ww) * 0.8, pt * 1.2, 3, dW + 0.45 * (dK - dW)),
-        ring(pw, pt, 3.6, dK - 7),
-        ring(pw * 0.97, pt * 0.8, 3.8, dK + 1.8)
-      ])]);
-
-    const span = pw * 0.97, gap = 1.6, slotW = (span - 3 * gap) / 4, ft0 = 0.6 * pt;
-    const offs = { index: 2.2, middle: 0, ring: 2.2, pinky: 7.2 };
-    FINGERS.forEach(function (name, k) {
-      const L = p['finger' + name.charAt(0).toUpperCase() + name.slice(1)];
-      const r = L / DEFAULTS['finger' + name.charAt(0).toUpperCase() + name.slice(1)];
-      const fw = slotW * clamp(0.5 + 0.5 * r, 0.7, 1.0), ft = ft0 * clamp(0.5 + 0.5 * r, 0.7, 1.25);
-      const x = thumbSign * (span / 2 - slotW / 2) - thumbSign * k * (slotW + gap), y = -(dK - offs[name]);
-      const segs = digitStraight(fw, ft, [0.47 * L, 0.28 * L, 0.25 * L], 0.78);
-      const keys = [
-        [{ key: name + '_spread', axis: Z, sign: thumbSign }, { key: name + '_mcp', axis: FLEX0, sign: 1 }],
-        [{ key: name + '_pip', axis: FLEX0, sign: 1 }],
-        [{ key: name + '_dip', axis: FLEX0, sign: 1 }]
-      ];
-      let parent = palmIdx;
-      segs.forEach(function (sg, i) {
-        parent = add(name + ['_prox', '_mid', '_dist'][i], parent, [x + sg.start[0], y + sg.start[1], 0], keys[i],
-          sg.shells.map(function (sh) { return translate(sh, x, y, 0); }));
-      });
+    const palmIdx = add('palm', -1, null, [], [m4apply(handTris('palm.stl'), toPart(side.palm.matrix))]);
+    const FLEX = [-1, 0, 0];                                      // bends a finger pointing along -y toward +z
+    FINGERS.forEach(function (f) {
+      const e = side.fingers[f];
+      const prox = add(f + '_prox', palmIdx, pivot(e.prox.pivot), [{ key: f + '_mcp', axis: FLEX, sign: 1 }],
+        [m4apply(handTris(e.prox.file), toPart(e.prox.matrix))]);
+      add(f + '_dist', prox, pivot(e.dist.pivot), [{ key: f + '_pip', axis: FLEX, sign: 1 }],
+        [m4apply(handTris(e.dist.file), toPart(e.dist.matrix))]);
     });
+    const th = side.thumb, TFLEX = [1, 0, 0];                      // the thumb bends toward the fingers (-z)
+    const tprox = add('thumb_prox', palmIdx, pivot(th.prox.pivot), [{ key: 'thumb_mcp', axis: TFLEX, sign: 1 }],
+      [m4apply(handTris(th.prox.file), toPart(th.prox.matrix))]);
+    add('thumb_dist', tprox, pivot(th.dist.pivot), [{ key: 'thumb_pip', axis: TFLEX, sign: 1 }],
+      [m4apply(handTris(th.dist.file), toPart(th.dist.matrix))]);
 
-    // thumb: metacarpal and two bones, resting 32 degrees away from the palm edge
-    {
-      const L = p.fingerThumb, r = L / DEFAULTS.fingerThumb, phi = thumbSign * 32 * DEG;
-      const tw = 0.215 * pw * clamp(0.5 + 0.5 * r, 0.7, 1.15), tt = 0.64 * pt * clamp(0.5 + 0.5 * r, 0.7, 1.25);
-      const segs = digitStraight(tw, tt, [0.295 * L, 0.386 * L, 0.318 * L], 0.82);
-      const bx = thumbSign * 0.39 * pw, by = -(d0 + 0.67 * pl), bz = 0.2 * pt;
-      const FA = [-Math.cos(phi), -Math.sin(phi), 0];                  // flexion axis of the angled thumb
-      const keys = [
-        [{ key: 'thumb_abd', axis: Z, sign: thumbSign }, { key: 'thumb_opp', axis: FA, sign: 1 }],
-        [{ key: 'thumb_mcp', axis: FA, sign: 1 }],
-        [{ key: 'thumb_ip', axis: FA, sign: 1 }]
-      ];
-      let parent = palmIdx;
-      segs.forEach(function (sg, i) {
-        const c = Math.cos(phi), s = Math.sin(phi);
-        const st = sg.start;                                           // rotate the start point about z, then move
-        const pv = [st[0] * c - st[1] * s + bx, st[0] * s + st[1] * c + by, bz];
-        parent = add('thumb' + ['_meta', '_prox', '_dist'][i], parent, pv, keys[i],
-          sg.shells.map(function (sh) { return translate(rotZ(sh, phi), bx, by, bz); }));
-      });
-    }
-
-    const base = [revolve([[J.Rmi, -J.stubLen], [J.Rm, -J.stubLen], [J.Rm, 0], [J.Ro, 0], [J.Ro, J.shoulder], [J.Rmi, J.shoulder]], 0, 2 * PI, 72)]
-      .concat(lugShells());
-    const hand = { segments: segments, base: base, pre: -3 * J.lock * DEG, thumbSign: thumbSign };
-    const longest = Math.max(p.fingerIndex, p.fingerMiddle, p.fingerRing, p.fingerPinky);
-    return { name: 'hand', shells: handShells(hand, poseDefaults()), length: d0 + pl + longest + 1, male: true, rimDepth: null, hand: hand };
+    const hand = { segments: segments, base: base, pre: -3 * J.lock * DEG, rim: rim };
+    // length: down to the farthest fingertip with every finger open
+    const open = handShells({ segments: segments, base: [], pre: 0 }, preset('open'));
+    const bb = bounds(concat(open));
+    const res = { name: 'hand', shells: handShells(hand, poseDefaults()), length: -bb.min[1] + 1, male: true, rimDepth: null, hand: hand };
+    handCache[p.side] = res;
+    return res;
   }
 
   /* ------------------------------------------------------------------ */
@@ -851,10 +855,6 @@
       if (p.hcStrut < 2.4) warnings.push('Honeycomb struts under 2.4 mm are thin for a 0.4 mm nozzle and for daily loads.');
       if (p.hcHole / (p.hcHole + p.hcStrut) > 0.78) warnings.push('More than half of the wall is open. Add strut width or extra wall.');
     }
-    if (p.wristWidth > p.palmWidth)
-      warnings.push('The wrist is wider than the palm. Check the palm and wrist widths.');
-    if (p.fingerMiddle < p.fingerIndex - 1 || p.fingerMiddle < p.fingerRing - 1)
-      warnings.push('The middle finger is shorter than a neighbour, which is unusual.');
     if (p.limbLength > 200) warnings.push('A long residual limb makes a long, heavy socket. Check print time and bed size.');
     return { errors: errors, warnings: warnings };
   }
@@ -969,7 +969,7 @@
     socket: 'Print collar-down (the flat joint face on the bed). Layer height 0.2 mm, 4+ perimeters, 40%+ gyroid infill. Check the inside surface: a smooth, seam-free finish matters under a prosthetic sock. Sand or vapor-smooth the rim and the inside before use.',
     tube: 'Print collar-down with the male stub pointing up. 4+ perimeters, 40%+ gyroid infill. The lug underside is a short 3 mm overhang; test with and without supports.',
     wrist: 'Same orientation as the forearm tube.',
-    hand: 'Printed rigid in the relaxed pose. Lay it on its back in your slicer (lay-flat) with the stub sideways; supports are needed under the stub lugs, thumb and fingers. The hand-segments folder holds each bone straight, with hand-joints.json listing every pivot, axis and range, for building a hinged version.'
+    hand: 'hand.stl is only the new adapter that joins the palm to the standard joint; print it collar-down like the other joint parts. The palm, fingers, link bars and thumb are the published files in the hand folder, already lying as the author printed them. Their pins are 1.75 mm filament, the fingers are pulled by fishing line and returned by elastic cord, and a fabric strap with velcro holds the palm on, as described on the Thingiverse page.'
   };
 
   return {
@@ -977,7 +977,9 @@
     build: build, validate: validate, placed: placed, ghosts: ghosts, fitModel: fitModel,
     volume: volume, checkClosed: checkClosed, bounds: bounds, toSTL: toSTL, concat: concat,
     translate: translate,
-    HAND_ROM: HAND_ROM, DIGITS: DIGITS, FINGERS: FINGERS, poseDefaults: poseDefaults, preset: preset,
-    handMatrices: handMatrices, handShells: handShells, jointTable: jointTable
+    HAND_ROM: HAND_ROM, DIGITS: DIGITS, FINGERS: FINGERS, CURL_KEYS: CURL_KEYS, poseDefaults: poseDefaults, preset: preset,
+    handMatrices: handMatrices, handShells: handShells, jointTable: jointTable,
+    ASSET_FILES: ASSET_FILES, setHandAssets: setHandAssets, handReady: handReady, handFile: handFile, handPrintFiles: handPrintFiles,
+    HAND_ATTRIBUTION: HAND_ATTRIBUTION, parseSTL: parseSTL
   };
 });

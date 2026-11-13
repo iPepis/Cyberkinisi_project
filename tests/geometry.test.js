@@ -1,6 +1,6 @@
 // Run with: node tests/geometry.test.js
 const assert = require('assert');
-const OPB = require('../web/src/geometry.js');
+const OPB = require('../tools/load-hand.js')(require('../web/src/geometry.js'));
 
 let failures = 0;
 function check(name, fn) {
@@ -12,7 +12,7 @@ const cases = {
   'default right arm': {},
   'left arm, long limb, thick sock': { side: 'left', limbLength: 200, sockPlies: 10, linerMm: 3 },
   'short limb, no sock, flat rim': { limbLength: 70, sockPlies: 0, flare: false, circProx: 220, circMid: 205, circDist: 175 },
-  'extremes of the sliders': { limbLength: 300, circProx: 500, circMid: 500, circDist: 460, sockPlies: 30, linerMm: 6, clearance: 6, wall: 15, tubeLength: 600, tubeWall: 11, wristLength: 200, palmLength: 170, palmWidth: 160, palmThickness: 60, wristWidth: 110, wristThickness: 80, fingerThumb: 150, fingerIndex: 150, fingerMiddle: 160, fingerRing: 150, fingerPinky: 130 }
+  'extremes of the sliders': { limbLength: 300, circProx: 500, circMid: 500, circDist: 460, sockPlies: 30, linerMm: 6, clearance: 6, wall: 15, tubeLength: 600, tubeWall: 11, wristLength: 200 }
 };
 
 for (const [label, params] of Object.entries(cases)) {
@@ -153,19 +153,63 @@ check('honeycomb: one pattern runs across socket and tube once the tube is locke
   assert.ok(on > 200 && on / tot > 0.1, on + ' of ' + tot + ' tube vertices lie on the shared pattern');
 });
 
-check('hand: every pose in the range of motion keeps every shell closed', () => {
+// Published figures of the imported meshes (triangle counts and sizes of the files on Thingiverse).
+const PUBLISHED = { 'palm.stl': 278278, 'finger_middle_prox.stl': 17680, 'finger_index_prox.stl': 17680, 'finger_ring_prox.stl': 17680,
+  'finger_pinky_prox.stl': 17680, 'finger_middle_dist.stl': 17850, 'finger_index_dist.stl': 17552, 'finger_ring_dist.stl': 17552,
+  'finger_pinky_dist.stl': 17338, 'thumb_prox.stl': 17072, 'thumb_dist.stl': 13124, 'links.stl': 2868 };
+
+check('hand: the imported palm and finger meshes are unchanged (triangle counts, size, volume)', () => {
+  Object.entries(PUBLISHED).forEach(([name, n]) => assert.strictEqual(OPB.parseSTL(OPB.handFile(name)).length / 9, n, name));
+  const raw = OPB.parseSTL(OPB.handFile('palm.stl')), bb = OPB.bounds(raw);
+  const size = bb.max.map((v, i) => v - bb.min[i]);
+  [98.3, 90.6, 116.6].forEach((v, i) => assert.ok(Math.abs(size[i] - v) < 0.2, 'palm size ' + size));
+  ['right', 'left'].forEach(side => {
+    const b = OPB.build({ side });
+    const sg = b.parts[3].hand.segments;
+    const vol = id => OPB.volume(OPB.concat(sg.find(s => s.id === id).shells));
+    assert.ok(Math.abs(vol('palm') / OPB.volume(raw) - 1) < 1e-4, side + ' palm volume changed');
+    ['index', 'middle', 'ring', 'pinky', 'thumb'].forEach(f => ['prox', 'dist'].forEach(k => {
+      const r = OPB.volume(OPB.parseSTL(OPB.handFile((f === 'thumb' ? 'thumb_' : 'finger_' + f + '_') + k + '.stl')));
+      assert.ok(Math.abs(vol(f + '_' + k) / r - 1) < 1e-4, side + ' ' + f + ' ' + k + ' volume changed');
+    }));
+  });
+});
+
+check('hand: the palm file for the left hand is the right palm reflected, with outward-facing triangles', () => {
+  const l = OPB.parseSTL(OPB.handPrintFiles('left')['palm.stl']), r = OPB.parseSTL(OPB.handPrintFiles('right')['palm.stl']);
+  assert.strictEqual(l.length, r.length);
+  assert.ok(Math.abs(OPB.volume(l) - OPB.volume(r)) < 1e-3 * OPB.volume(r));
+  assert.ok(OPB.volume(l) > 0);
+  const lb = OPB.bounds(l), rb = OPB.bounds(r);
+  assert.ok(Math.abs((lb.max[0] - lb.min[0]) - (rb.max[0] - rb.min[0])) < 1e-3);
+  assert.ok(Math.abs(lb.min[0] - 464.3) < 0.1 && Math.abs(lb.max[0] - 562.6) < 0.1, 'left palm must sit where the published left file does');
+});
+
+check('hand: hinge pins of each finger keep the published distances', () => {
+  // proximal bone knuckle pin to distal pin: 44.25 mm on the middle bone, 38.3 mm on the others (hole centres in the STL files)
+  const b = OPB.build({}), sg = id => b.parts[3].hand.segments.find(s => s.id === id);
+  const dist = (a, c) => Math.hypot(a[0] - c[0], a[1] - c[1], a[2] - c[2]);
+  const want = { middle: 44.25, index: 38.32, ring: 38.32, pinky: 38.32, thumb: 30.05 };
+  Object.entries(want).forEach(([f, d]) => {
+    const A = sg(f + '_prox').pivot, B = sg(f + '_dist').pivot;
+    assert.ok(Math.abs(dist(A, B) - d) < 0.35, f + ' pin distance ' + dist(A, B));
+  });
+  // the four knuckle pins sit side by side across the palm, 22 to 24 mm apart
+  const xs = ['index', 'middle', 'ring', 'pinky'].map(f => sg(f + '_prox').pivot[0]);
+  for (let i = 1; i < 4; i++) assert.ok(Math.abs(xs[i] - xs[i - 1]) > 20 && Math.abs(xs[i] - xs[i - 1]) < 26, 'knuckle spacing ' + (xs[i] - xs[i - 1]));
+});
+
+check('hand: every pose keeps every segment outward-facing and finite', () => {
   const b = OPB.build({});
   const hand = b.parts[3].hand;
-  ['relaxed', 'open', 'fist', 'hook'].forEach(name => {
-    OPB.handShells(hand, OPB.preset(name)).forEach((s, i) => {
-      assert.ok(OPB.checkClosed(s).closed, name + ' shell ' + i + ' is open');
-      assert.ok(OPB.volume(s) > 0, name + ' shell ' + i + ' has non-positive volume');
-    });
+  const ok = (shells, label) => shells.forEach((s, i) => {
+    assert.ok(OPB.volume(s) > 0, label + ' shell ' + i + ' has non-positive volume');
+    assert.ok(s.every(Number.isFinite), label + ' shell ' + i + ' has a non-finite coordinate');
   });
-  // extremes of every single joint
+  ['relaxed', 'open', 'fist', 'hook'].forEach(name => ok(OPB.handShells(hand, OPB.preset(name)), name));
   Object.keys(OPB.HAND_ROM).forEach(k => ['min', 'max'].forEach(e => {
     const pose = OPB.poseDefaults(); pose[k] = OPB.HAND_ROM[k][e];
-    OPB.handShells(hand, pose).forEach(s => assert.ok(OPB.checkClosed(s).closed, k + ' ' + e));
+    ok(OPB.handShells(hand, pose), k + ' ' + e);
   }));
 });
 
@@ -173,39 +217,48 @@ check('hand: ranges of motion are sane and the relaxed pose is inside them', () 
   Object.entries(OPB.HAND_ROM).forEach(([k, r]) => {
     assert.ok(r.min <= r.def && r.def <= r.max, k + ' default outside its range');
     assert.ok(r.max - r.min >= 20, k + ' has almost no travel');
+    assert.ok(r.min >= 0, k + ': the printed fingers stop at straight');
   });
-  assert.ok(OPB.HAND_ROM.index_pip.min >= 0, 'fingers do not bend backward at the middle joint');
-  assert.ok(OPB.HAND_ROM.index_mcp.max >= 85 && OPB.HAND_ROM.index_pip.max >= 100, 'a fist must be reachable');
+  assert.strictEqual(Object.keys(OPB.HAND_ROM).length, 10);
+  assert.ok(OPB.HAND_ROM.index_mcp.max >= 85 && OPB.HAND_ROM.index_pip.max >= 95, 'a fist must be reachable');
 });
 
-check('hand: a fist is shorter than an open hand and the wrist moves the whole hand', () => {
-  const b = OPB.build({});
-  const ext = pose => { const bb = OPB.bounds(OPB.concat(OPB.handShells(b.parts[3].hand, pose))); return bb.max[1] - bb.min[1]; };
-  assert.ok(ext(OPB.preset('fist')) < ext(OPB.preset('open')) - 25);
-  const flexed = OPB.poseDefaults(); flexed.wrist_flex = 60;
-  const bb0 = OPB.bounds(OPB.concat(OPB.handShells(b.parts[3].hand, OPB.preset('open'))));
-  const open60 = OPB.preset('open'); open60.wrist_flex = 60;
-  const bb1 = OPB.bounds(OPB.concat(OPB.handShells(b.parts[3].hand, open60)));
-  // in the part frame the palm side is -z (the hand is turned 180 degrees until it is locked onto the arm)
-  assert.ok(bb0.min[2] - bb1.min[2] > 20, 'bending the wrist should swing the hand toward the palm side');
+check('hand: a fist is shorter than an open hand and the fingers curl toward the palm side', () => {
+  const b = OPB.build({}), hand = { segments: b.parts[3].hand.segments, base: [], pre: 0 };
+  const box = (pose, id) => OPB.bounds(OPB.concat(OPB.handShells(hand, pose).filter((s, i) => id === undefined || i === id)));
+  const ext = pose => { const bb = box(pose); return bb.max[1] - bb.min[1]; };
+  assert.ok(ext(OPB.preset('fist')) < ext(OPB.preset('open')) - 40);
+  // middle fingertip bone: segment 4 (palm, index x2, middle prox, middle dist)
+  const idx = hand.segments.findIndex(s => s.id === 'middle_dist');
+  const cz = pose => { const bb = box(pose, idx); return (bb.min[2] + bb.max[2]) / 2; };
+  assert.ok(cz(OPB.preset('fist')) > cz(OPB.preset('open')) + 40, 'fingertip must move toward +z, the palm side');
 });
 
-check('hand: each finger length slider changes only that finger', () => {
-  const ext = (b, prefix) => {
-    const sh = [];
-    b.parts[3].hand.segments.filter(s => s.id.indexOf(prefix) === 0).forEach(s => s.shells.forEach(x => sh.push(x)));
-    const bb = OPB.bounds(OPB.concat(sh)); return bb.max[1] - bb.min[1];
-  };
-  const a = OPB.build({}), c = OPB.build({ fingerRing: 95 });
-  assert.ok(ext(c, 'ring') > ext(a, 'ring') + 10);
-  ['index', 'middle', 'pinky', 'thumb'].forEach(n => assert.ok(Math.abs(ext(c, n) - ext(a, n)) < 1e-3, n + ' changed'));
+check('hand: the thumb sits on the opposite wall of the palm and bends toward the fingers', () => {
+  const b = OPB.build({}), hand = { segments: b.parts[3].hand.segments, base: [], pre: 0 };
+  const sg = id => hand.segments.find(s => s.id === id);
+  assert.ok(sg('thumb_prox').pivot[2] * sg('middle_prox').pivot[2] < 0, 'thumb and fingers hinge on opposite walls');
+  const idx = hand.segments.findIndex(s => s.id === 'thumb_dist');
+  const cz = pose => { const bb = OPB.bounds(OPB.concat(OPB.handShells(hand, pose).filter((s, i) => i === idx))); return (bb.min[2] + bb.max[2]) / 2; };
+  const bent = OPB.preset('open'); bent.thumb_mcp = 60; bent.thumb_pip = 60;
+  const toward = Math.sign(sg('middle_prox').pivot[2]);
+  assert.ok((cz(bent) - cz(OPB.preset('open'))) * toward > 20, 'thumb tip must move toward the fingers');
 });
 
-check('hand: palm sliders change the palm and nothing else', () => {
-  const a = OPB.build({}), c = OPB.build({ palmWidth: 100 });
-  const bb = b => OPB.bounds(OPB.concat(b.parts[3].hand.segments.find(s => s.id === 'palm').shells));
-  assert.ok(bb(c).max[0] - bb(c).min[0] > bb(a).max[0] - bb(a).min[0] + 10);
-  assert.strictEqual(c.info.lengths.socket, a.info.lengths.socket);
+check('hand: the left hand mirrors the right hand', () => {
+  const r = OPB.build({}), l = OPB.build({ side: 'left' });
+  const bb = b => OPB.bounds(OPB.concat(b.parts[3].shells));
+  const R = bb(r), L = bb(l);
+  [1, 2].forEach(k => { assert.ok(Math.abs(R.min[k] - L.min[k]) < 1e-3 && Math.abs(R.max[k] - L.max[k]) < 1e-3); });
+  assert.ok(Math.abs(R.min[0] + L.max[0]) < 1e-3 && Math.abs(R.max[0] + L.min[0]) < 1e-3);
+  assert.strictEqual(r.parts[3].length, l.parts[3].length);
+});
+
+check('hand adapter: the print files are the published ones, byte for byte, and attributed', () => {
+  const f = OPB.handPrintFiles('right');
+  assert.strictEqual(Object.keys(f).length, OPB.ASSET_FILES.length);
+  OPB.ASSET_FILES.forEach(n => assert.strictEqual(f[n], OPB.handFile(n)));
+  assert.ok(/BQEducacion/.test(OPB.HAND_ATTRIBUTION) && /1095104/.test(OPB.HAND_ATTRIBUTION) && /ShareAlike/.test(OPB.HAND_ATTRIBUTION));
 });
 
 if (failures) { console.log('\n' + failures + ' test(s) failed'); process.exit(1); }

@@ -2,7 +2,7 @@
 //   node tools/export-sample.js [out-dir] [json-with-parameter-overrides]
 const fs = require('fs');
 const path = require('path');
-const OPB = require('../web/src/geometry.js');
+const OPB = require('./load-hand.js')(require('../web/src/geometry.js'));
 
 const dir = process.argv[2] || path.join(__dirname, '..', 'samples');
 const params = process.argv[3] ? JSON.parse(process.argv[3]) : {};
@@ -12,8 +12,13 @@ v.warnings.forEach(w => console.warn('warning:', w));
 
 const b = OPB.build(params);
 fs.mkdirSync(dir, { recursive: true });
-b.parts.forEach(p => fs.writeFileSync(path.join(dir, p.name + '.stl'), Buffer.from(OPB.toSTL(OPB.concat(p.shells), p.name))));
+b.parts.forEach(p => fs.writeFileSync(path.join(dir, p.name + '.stl'), Buffer.from(OPB.toSTL(OPB.concat(p.name === 'hand' ? p.hand.base : p.shells), p.name))));
+// the palm, fingers, links and thumb exactly as published
+fs.mkdirSync(path.join(dir, 'hand'), { recursive: true });
+const hf = OPB.handPrintFiles(b.params.side);
+Object.keys(hf).forEach(n => fs.writeFileSync(path.join(dir, 'hand', n), hf[n]));
+fs.writeFileSync(path.join(dir, 'hand', 'ATTRIBUTION.txt'), OPB.HAND_ATTRIBUTION);
 const all = b.parts.map(p => OPB.placed(b, p, 0, 1));
 fs.writeFileSync(path.join(dir, 'assembled.stl'), Buffer.from(OPB.toSTL(OPB.concat(all), 'assembled')));
-fs.writeFileSync(path.join(dir, 'parameters.json'), JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.3', units: 'mm', parameters: b.params }, null, 2));
-console.log('wrote 4 parts + assembled.stl to', dir, '| total length', b.info.total.toFixed(0), 'mm');
+fs.writeFileSync(path.join(dir, 'parameters.json'), JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.4', units: 'mm', parameters: b.params }, null, 2));
+console.log('wrote 4 parts + hand/ + assembled.stl to', dir, '| total length', b.info.total.toFixed(0), 'mm');

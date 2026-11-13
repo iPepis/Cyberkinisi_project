@@ -1,0 +1,12 @@
+Palm, finger bones, link bars and thumb bones in this folder
+
+  "Hand" by BQEducacion (author page: http://www.soniaverdu.es/)
+  https://www.thingiverse.com/thing:1095104
+  Licence: Creative Commons Attribution-ShareAlike (CC BY-SA), as listed on the Thingiverse page.
+
+The triangles are the author's, split into separate files and nothing else.
+The left palm is the right palm reflected; it is made when the zip is built.
+Anything you build from them must keep this credit and be shared under the same licence.
+
+hand-rig.json is new work: the transforms and joint pivots that place these parts in the hand,
+produced by tools/import_hand.py.

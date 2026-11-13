@@ -181,22 +181,8 @@
   panel.appendChild(card('Wrist adapter', '--c-wrist', null, [
     slider('wristLength', 'Length', 'mm', 'Adds length and lets you swap hands.')
   ]));
-  panel.appendChild(card('Hand', '--c-hand', 'Wrist, palm, four fingers and the thumb are separate segments joined like a real hand. Size them below.', [
+  panel.appendChild(card('Hand', '--c-hand', 'The palm, four fingers and thumb are the printed "Hand" by BQEducacion (CC BY-SA), used exactly as published. A new adapter joins the palm to the standard bayonet joint. The link bars are printed spare parts, not shown.', [
     el('div', { class: 'field' }, [el('span', { class: 'lbl', text: 'Arm side' }), segGroup('side', [['right', 'Right arm'], ['left', 'Left arm']], 'Arm side')])
-  ]));
-  panel.appendChild(card('Palm and wrist', '--c-hand', null, [
-    slider('palmLength', 'Palm length', 'mm', 'Wrist joint to the knuckle line.'),
-    slider('palmWidth', 'Palm width', 'mm', 'Across the knuckles.'),
-    slider('palmThickness', 'Palm thickness', 'mm', 'Fingers scale their thickness from this.'),
-    slider('wristWidth', 'Wrist width', 'mm'),
-    slider('wristThickness', 'Wrist thickness', 'mm')
-  ]));
-  panel.appendChild(card('Fingers', '--c-hand', 'One length for each digit. Width and thickness follow the length.', [
-    slider('fingerThumb', 'Thumb', 'mm'),
-    slider('fingerIndex', 'Index finger', 'mm'),
-    slider('fingerMiddle', 'Middle finger', 'mm'),
-    slider('fingerRing', 'Ring finger', 'mm'),
-    slider('fingerPinky', 'Little finger', 'mm')
   ]));
 
   /* hand pose: every joint limited to the range of a real hand */
@@ -214,7 +200,7 @@
       el('div', { class: 'row' }, [range, el('div', { class: 'numwrap' }, [num, el('span', { class: 'u', text: '°' })])])
     ]);
   }
-  function curlKeys(d) { return d === 'thumb' ? ['thumb_opp', 'thumb_mcp', 'thumb_ip'] : [d + '_mcp', d + '_pip', d + '_dip']; }
+  function curlKeys(d) { return OPB.CURL_KEYS[d]; }
   function curlRow(d) {
     var id = 'c_' + d, range = el('input', { type: 'range', id: id, min: 0, max: 100, step: 1 });
     var out = el('span', { class: 'mono' });
@@ -242,14 +228,13 @@
   var poseKids = [
     el('div', { class: 'chips' }, [['relaxed', 'Relaxed'], ['open', 'Open'], ['fist', 'Fist'], ['hook', 'Hook grip']].map(function (n) {
       return el('button', { type: 'button', text: n[1], onclick: function () { state.pose = OPB.preset(n[0]); afterPose(); } });
-    })),
-    poseRow('wrist_flex'), poseRow('wrist_dev')
+    }))
   ];
   OPB.DIGITS.forEach(function (d) {
     var keys = Object.keys(OPB.HAND_ROM).filter(function (k) { return OPB.HAND_ROM[k].group === d; });
     poseKids.push(el('details', { class: 'adv' }, [el('summary', { text: DIGIT_LABEL[d] }), curlRow(d)].concat(keys.map(poseRow))));
   });
-  panel.appendChild(card('Hand pose', '--c-hand', 'Preview only. Each joint stops at the range of a real hand. The printed hand is exported in the relaxed pose.', poseKids));
+  panel.appendChild(card('Hand pose', '--c-hand', 'Preview only. Each finger and the thumb bend at the base and at the joint near the tip, as far as the printed parts allow. The fingers move freely once assembled; nothing is exported in a pose.', poseKids));
 
   var statsEl = el('dl', { class: 'stats', id: 'stats' });
   var issuesEl = el('ul', { class: 'issues', id: 'issues' });
@@ -362,7 +347,7 @@
   var FORE = LIMB.concat(['wall', 'flare', 'tubeLength', 'tubeWall', 'wristLength', 'design', 'hcHole', 'hcStrut', 'hcExtra']);
   var DEPS = {
     socket: FORE, tube: FORE, wrist: FORE,
-    hand: ['palmLength', 'palmWidth', 'palmThickness', 'wristWidth', 'wristThickness', 'fingerThumb', 'fingerIndex', 'fingerMiddle', 'fingerRing', 'fingerPinky', 'side']
+    hand: ['side']
   };
 
   var handModel = null, handMeshes = [];
@@ -587,19 +572,23 @@
   function failed(name) { return function (e) { say(e && e.code === 'declined' ? 'Download cancelled.' : 'Could not save ' + name + '.'); }; }
   function slug() { return 'open-prosthetic-' + state.side + '-arm'; }
 
-  function partSTL(name) { var part = current.parts[PARTS.indexOf(name)]; return OPB.toSTL(OPB.concat(part.shells), name); }
+  // The hand part exports only the new adapter (stub, flange, neck and saddle); the palm and finger files are the published meshes.
+  function partSTL(name) {
+    var part = current.parts[PARTS.indexOf(name)];
+    return OPB.toSTL(OPB.concat(name === 'hand' ? part.hand.base : part.shells), name === 'hand' ? 'hand-adapter' : name);
+  }
   function assembledSTL() {
     var all = current.parts.map(function (part) { return OPB.placed(current, part, 0, 1); });
     return OPB.toSTL(OPB.concat(all), 'assembled');
   }
   function settingsJSON() {
     var p = {}; Object.keys(OPB.DEFAULTS).forEach(function (k) { p[k] = state[k]; });
-    return JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.3', units: 'mm', parameters: p }, null, 2);
+    return JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.4', units: 'mm', parameters: p }, null, 2);
   }
   function readme() {
     var i = current.info, p = current.params;
     var L = [
-      'OPEN PROSTHETIC BUILDER, below-elbow arm, prototype v0.0.3', '',
+      'OPEN PROSTHETIC BUILDER, below-elbow arm, prototype v0.0.4', '',
       'NOT A CERTIFIED MEDICAL DEVICE. Have a prosthetist or clinician review the socket fit and the load-bearing joints before anyone wears this.', '',
       'YOUR SETTINGS (mm)',
       '  Residual limb length: ' + p.limbLength,
@@ -609,17 +598,14 @@
       '  Extra clearance: ' + p.clearance,
       '  Socket inside diameter, rim / middle / end: ' + f1(i.innerDia.rim) + ' / ' + f1(i.innerDia.mid) + ' / ' + f1(i.innerDia.distal),
       '  Part lengths: socket ' + Math.round(i.lengths.socket) + ', tube ' + Math.round(i.lengths.tube) + ', wrist adapter ' + Math.round(i.lengths.wrist) + ', hand ' + Math.round(i.lengths.hand),
-      '  Palm length / width / thickness: ' + p.palmLength + ' / ' + p.palmWidth + ' / ' + p.palmThickness,
-      '  Wrist width / thickness: ' + p.wristWidth + ' / ' + p.wristThickness,
-      '  Finger lengths, thumb / index / middle / ring / little: ' + [p.fingerThumb, p.fingerIndex, p.fingerMiddle, p.fingerRing, p.fingerPinky].join(' / '),
       '  Arm side: ' + p.side,
       '  Design: ' + (p.design === 'honeycomb' ? 'Honeycomb, holes ' + p.hcHole + ' mm, struts ' + p.hcStrut + ' mm, extra wall ' + p.hcExtra + ' mm, open area socket ' + Math.round(100 * i.honeycomb.socket) + '%' + (i.honeycomb.tube == null ? '' : ', tube ' + Math.round(100 * i.honeycomb.tube) + '%') : 'Basic Design (smooth walls)'), '',
       'FILES',
-      '  socket.stl, tube.stl, wrist.stl, hand.stl   one file per part, each already lying in its print orientation',
+      '  socket.stl, tube.stl, wrist.stl, hand.stl   one file per part, each already lying in its print orientation (hand.stl is the new hand adapter)',
       '  assembled.stl                                the whole arm in its locked pose, for checking only',
       '  parameters.json                              reload or share these settings',
-      '  hand-segments/*.stl                          every bone of the hand, straight, for building a hinged hand',
-      '  hand-joints.json                             pivot, axis and real range of motion of every hand joint', '',
+      '  hand/*.stl                                   the palm, eight finger bones, the two thumb bones and the link bars, as published (see hand/ATTRIBUTION.txt)',
+      '  hand-joints.json                             pivot, axis and range of every finger joint in the preview', '',
       'PRINT NOTES'
     ];
     if (p.design === 'honeycomb') L.push('  Honeycomb: print upright as supplied. Cells are small enough to bridge, so supports should not be needed; check the preview in your slicer. Use at least 4 perimeters (walls) and 3 or more top layers so the struts print solid. Hole roofs are short bridges of different angles; slow the bridge speed and cool well. Files are large (up to a few hundred thousand triangles).');
@@ -632,7 +618,9 @@
       'KNOWN LIMITS OF THIS PROTOTYPE',
       '  The joint has no spring detent or safety pin yet, so it can turn back. Do not rely on it to carry load until the joint tests in docs/SPEC.md (milestone M0) pass.',
       '  Strap mounts and the suspension cuff are not modelled yet.',
-      '  hand.stl is one rigid piece in the relaxed pose. The hand is built from movable segments, but hinges, pin holes and tendon channels are not designed yet.');
+      '  The palm, fingers, thumb and link bars are the unchanged Thingiverse files by BQEducacion (CC BY-SA). The fingers are driven by fishing line and returned by elastic cord, with 1.75 mm filament as hinge pins, as described by the author; that mechanism is not part of this tool.',
+      '  The hand adapter (hand.stl) is new and untested: print it and check how the palm sits on it before relying on it. The palm is not changed to fit it.',
+      '  The printed link bars are included as spare print files but are not placed in the preview.');
     return L.join('\n');
   }
   function makeZip() {
@@ -642,8 +630,9 @@
     dir.file('assembled.stl', assembledSTL());
     dir.file('parameters.json', settingsJSON());
     dir.file('hand-joints.json', JSON.stringify(OPB.jointTable(current.parts[3].hand), null, 2));
-    var hs = dir.folder('hand-segments');
-    current.parts[3].hand.segments.forEach(function (sg) { hs.file(sg.id + '.stl', OPB.toSTL(OPB.concat(sg.shells), sg.id)); });
+    var hf = dir.folder('hand'), files = OPB.handPrintFiles(state.side);
+    Object.keys(files).forEach(function (n) { hf.file(n, files[n]); });
+    hf.file('ATTRIBUTION.txt', OPB.HAND_ATTRIBUTION);
     dir.file('README.txt', readme());
     return z.generateAsync({ type: 'blob' });
   }
