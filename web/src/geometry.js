@@ -693,6 +693,62 @@
     });
     return out;
   }
+
+  // Concatenate binary STL files into one (each keeps its own place on the plate).
+  function joinSTL(list) {
+    const n = list.reduce(function (s, u) { return s + (u.length - 84) / 50; }, 0);
+    const out = new Uint8Array(84 + 50 * n);
+    out.set(list[0].subarray(0, 80));
+    new DataView(out.buffer).setUint32(80, n, true);
+    let o = 84;
+    list.forEach(function (u) { out.set(u.subarray(84), o); o += u.length - 84; });
+    return out;
+  }
+  // links.stl holds five separate link bars (published layout). Split it into one STL per bar.
+  // The thumb bar is the largest; the longest of the rest is the middle finger's; the other three are identical
+  // in size, so they are handed out by plate order (index, ring, pinky).
+  function splitLinks() {
+    const u8 = HAND_ASSETS.bytes['links.stl'], t = handTris('links.stl'), n = t.length / 9;
+    const par = [], ids = {};
+    const find = function (a) { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+    const vid = function (i, k) {
+      const o = i * 9 + k * 3, key = t[o].toFixed(3) + ',' + t[o + 1].toFixed(3) + ',' + t[o + 2].toFixed(3);
+      if (!(key in ids)) { ids[key] = par.length; par.push(par.length); }
+      return ids[key];
+    };
+    for (let i = 0; i < n; i++) { const a = vid(i, 0); par[find(vid(i, 1))] = find(a); par[find(vid(i, 2))] = find(a); }
+    const groups = {};
+    for (let i = 0; i < n; i++) (groups[find(vid(i, 0))] = groups[find(vid(i, 0))] || []).push(i);
+    const bars = Object.keys(groups).map(function (k) {
+      const idx = groups[k], out = new Uint8Array(84 + 50 * idx.length);
+      out.set(u8.subarray(0, 80));
+      new DataView(out.buffer).setUint32(80, idx.length, true);
+      let y = 0, xmin = Infinity, xmax = -Infinity;
+      idx.forEach(function (ti, j) {
+        out.set(u8.subarray(84 + 50 * ti, 134 + 50 * ti), 84 + 50 * j);
+        y += t[ti * 9 + 1];
+        for (let v = 0; v < 3; v++) { xmin = Math.min(xmin, t[ti * 9 + v * 3]); xmax = Math.max(xmax, t[ti * 9 + v * 3]); }
+      });
+      return { bytes: out, tris: idx.length, y: y / idx.length, len: xmax - xmin };
+    });
+    if (bars.length !== 5) throw new Error('links.stl: expected 5 link bars, found ' + bars.length);
+    const thumb = bars.reduce(function (m, b) { return b.tris > m.tris ? b : m; });
+    const rest = bars.filter(function (b) { return b !== thumb; });
+    const mid = rest.reduce(function (m, b) { return b.len > m.len ? b : m; });
+    const other = rest.filter(function (b) { return b !== mid; }).sort(function (a, b) { return a.y - b.y; });
+    return { middle: mid.bytes, index: other[0].bytes, ring: other[1].bytes, pinky: other[2].bytes, thumb: thumb.bytes };
+  }
+  // One print file per digit: its two bones plus its link bar, as published. 'all' joins every digit.
+  function fingerFiles() {
+    if (!HAND_ASSETS) throw new Error('hand files are not loaded');
+    const L = splitLinks(), out = {}, B = HAND_ASSETS.bytes;
+    FINGERS.concat('thumb').forEach(function (f) {
+      const p = f === 'thumb' ? 'thumb_' : 'finger_' + f + '_';
+      out[f] = joinSTL([B[p + 'prox.stl'], B[p + 'dist.stl'], L[f]]);
+    });
+    out.all = joinSTL(Object.keys(out).map(function (k) { return out[k]; }));
+    return out;
+  }
   const HAND_ATTRIBUTION = [
     'Palm, finger bones, link bars and thumb bones in this folder',
     '',
@@ -979,7 +1035,7 @@
     translate: translate,
     HAND_ROM: HAND_ROM, DIGITS: DIGITS, FINGERS: FINGERS, CURL_KEYS: CURL_KEYS, poseDefaults: poseDefaults, preset: preset,
     handMatrices: handMatrices, handShells: handShells, jointTable: jointTable,
-    ASSET_FILES: ASSET_FILES, setHandAssets: setHandAssets, handReady: handReady, handFile: handFile, handPrintFiles: handPrintFiles,
+    ASSET_FILES: ASSET_FILES, setHandAssets: setHandAssets, handReady: handReady, handFile: handFile, handPrintFiles: handPrintFiles, fingerFiles: fingerFiles,
     HAND_ATTRIBUTION: HAND_ATTRIBUTION, parseSTL: parseSTL
   };
 });

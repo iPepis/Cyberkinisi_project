@@ -215,3 +215,13 @@ details.adv[open] summary { margin-bottom: 8px; }
 }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
 .tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.dl-split { position: relative; display: flex; min-width: 0; }
+.dl-split .btn:first-child { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.dl-arrow { padding-left: 10px; padding-right: 10px; border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.dl-menu { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.dl-menu[hidden] { display: none; }
+.dl-menu li { padding: 7px 10px; border-radius: 4px; font-size: 14px; cursor: pointer; display: flex; justify-content: space-between; }
+.dl-menu li:hover, .dl-menu li:focus-visible { background: var(--panel-2); }
+.dl-menu li[aria-selected="true"] { background: var(--accent-soft); font-weight: 600; }
+.dl-menu li[aria-selected="true"]::after { content: "\2713"; color: var(--accent); }

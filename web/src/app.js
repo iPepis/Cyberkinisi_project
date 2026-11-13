@@ -244,19 +244,34 @@
     var b = el('button', { type: 'button', class: 'btn' + (primary ? ' primary' : ''), text: text, onclick: fn });
     dlButtons[id] = b; return b;
   }
+  // Fingers: one print button joined to a small arrow that opens the list of digits.
+  var FINGER_OPTS = [['all', 'All'], ['thumb', 'Thumb'], ['index', 'Index'], ['middle', 'Middle'], ['ring', 'Ring'], ['pinky', 'Pinky']];
+  var fingerKey = 'all', fingerPicked = false;   // until the user picks, the button reads Fingers and downloads all
+  var fingerMenu = el('ul', { class: 'dl-menu', role: 'listbox', 'aria-label': 'Which fingers to print', hidden: '' });
+  var fingerArrow = dlBtn('fingersMenu', '\u25BE', function (e) { e.stopPropagation(); fingerMenu.hidden = !fingerMenu.hidden; fingerArrow.setAttribute('aria-expanded', String(!fingerMenu.hidden)); });
+  fingerArrow.className = 'btn dl-arrow'; fingerArrow.setAttribute('aria-label', 'Choose fingers'); fingerArrow.setAttribute('aria-haspopup', 'listbox'); fingerArrow.setAttribute('aria-expanded', 'false');
+  function drawFingerMenu() {
+    fingerMenu.textContent = '';
+    dlButtons.fingers.textContent = (fingerPicked ? FINGER_OPTS.filter(function (o) { return o[0] === fingerKey; })[0][1] : 'Fingers') + ' (.stl)';
+    FINGER_OPTS.forEach(function (o) {
+      fingerMenu.appendChild(el('li', { role: 'option', tabindex: '0', 'aria-selected': String(fingerPicked && o[0] === fingerKey), text: o[1], onclick: function () { fingerKey = o[0]; fingerPicked = true; fingerMenu.hidden = true; fingerArrow.setAttribute('aria-expanded', 'false'); drawFingerMenu(); },
+        onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.click(); } else if (e.key === 'Escape') { fingerMenu.hidden = true; fingerArrow.focus(); } } }));
+    });
+  }
+  document.addEventListener('click', function () { fingerMenu.hidden = true; fingerArrow.setAttribute('aria-expanded', 'false'); });
   var grid = el('div', { class: 'dl-grid' }, [
     dlBtn('socket', 'Socket (.stl)', function () { exportOne('socket'); }),
     dlBtn('tube', 'Forearm tube (.stl)', function () { exportOne('tube'); }),
     dlBtn('wrist', 'Wrist adapter (.stl)', function () { exportOne('wrist'); }),
-    dlBtn('hand', 'Hand (.stl)', function () { exportOne('hand'); }),
-    dlBtn('assembled', 'Assembled arm (.stl)', function () { exportAssembled(); }),
-    dlBtn('json', 'Settings (.json)', function () { exportJSON(); })
+    dlBtn('hand', 'Palm (.stl)', function () { exportOne('hand'); }),
+    el('div', { class: 'dl-split' }, [dlBtn('fingers', 'Fingers (.stl)', function () { exportFingers(); }), fingerArrow, fingerMenu])
   ]);
+  drawFingerMenu();
   var exportCard = card('Summary and download', null, null, [
     statsEl, issuesEl,
     dlBtn('zip', 'Download everything (.zip)', function () { exportZip(); }, true),
     grid, toastEl,
-    el('p', { class: 'safety', text: 'Every part prints on its own. The zip includes each part, the assembled arm, your settings, and print notes. Have a prosthetist check the socket fit before wearing it.' })
+    el('p', { class: 'safety', text: 'Every part prints on its own. The zip includes the socket, forearm tube, wrist adapter, palm, every finger with its connector, and print notes. Have a prosthetist check the socket fit before wearing it.' })
   ]);
   exportCard.id = 'export';
   panel.appendChild(exportCard);
@@ -533,7 +548,6 @@
     else if (v.warnings.length) { chip.className = 'chip warn'; chip.textContent = 'Ready, ' + v.warnings.length + (v.warnings.length === 1 ? ' warning' : ' warnings'); }
     else { chip.className = 'chip ok'; chip.textContent = 'Ready to export'; }
     Object.keys(dlButtons).forEach(function (k) { dlButtons[k].disabled = v.errors.length > 0; });
-    dlButtons.json.disabled = false;
   }
 
   /* ------------------------------ update loop ------------------------------ */
@@ -572,18 +586,12 @@
   function failed(name) { return function (e) { say(e && e.code === 'declined' ? 'Download cancelled.' : 'Could not save ' + name + '.'); }; }
   function slug() { return 'open-prosthetic-' + state.side + '-arm'; }
 
-  // The hand part exports only the new adapter (stub, flange, neck and saddle); the palm and finger files are the published meshes.
+  var FILE = { socket: 'socket', tube: 'tube', wrist: 'wrist', hand: 'palm' };
+  // The palm file is everything between the wrist adapter and the fingers: the new adapter (stub, neck, saddle) plus the published palm.
   function partSTL(name) {
     var part = current.parts[PARTS.indexOf(name)];
-    return OPB.toSTL(OPB.concat(name === 'hand' ? part.hand.base : part.shells), name === 'hand' ? 'hand-adapter' : name);
-  }
-  function assembledSTL() {
-    var all = current.parts.map(function (part) { return OPB.placed(current, part, 0, 1); });
-    return OPB.toSTL(OPB.concat(all), 'assembled');
-  }
-  function settingsJSON() {
-    var p = {}; Object.keys(OPB.DEFAULTS).forEach(function (k) { p[k] = state[k]; });
-    return JSON.stringify({ tool: 'Open Prosthetic Builder', version: '0.0.4', units: 'mm', parameters: p }, null, 2);
+    if (name !== 'hand') return OPB.toSTL(OPB.concat(part.shells), name);
+    return OPB.toSTL(OPB.concat(part.hand.base.concat(part.hand.segments[0].shells)), 'palm');
   }
   function readme() {
     var i = current.info, p = current.params;
@@ -601,11 +609,9 @@
       '  Arm side: ' + p.side,
       '  Design: ' + (p.design === 'honeycomb' ? 'Honeycomb, holes ' + p.hcHole + ' mm, struts ' + p.hcStrut + ' mm, extra wall ' + p.hcExtra + ' mm, open area socket ' + Math.round(100 * i.honeycomb.socket) + '%' + (i.honeycomb.tube == null ? '' : ', tube ' + Math.round(100 * i.honeycomb.tube) + '%') : 'Basic Design (smooth walls)'), '',
       'FILES',
-      '  socket.stl, tube.stl, wrist.stl, hand.stl   one file per part, each already lying in its print orientation (hand.stl is the new hand adapter)',
-      '  assembled.stl                                the whole arm in its locked pose, for checking only',
-      '  parameters.json                              reload or share these settings',
-      '  hand/*.stl                                   the palm, eight finger bones, the two thumb bones and the link bars, as published (see hand/ATTRIBUTION.txt)',
-      '  hand-joints.json                             pivot, axis and range of every finger joint in the preview', '',
+      '  socket.stl, tube.stl, wrist.stl, palm.stl   one file per part, each already lying in its print orientation (palm.stl is the new hand adapter joined to the published palm)',
+      '  fingers/all.stl                              all four fingers and the thumb, each with its link bar',
+      '  fingers/<finger>.stl                         one finger (or the thumb): its two bones and its link bar, as published (see ATTRIBUTION.txt)', '',
       'PRINT NOTES'
     ];
     if (p.design === 'honeycomb') L.push('  Honeycomb: print upright as supplied. Cells are small enough to bridge, so supports should not be needed; check the preview in your slicer. Use at least 4 perimeters (walls) and 3 or more top layers so the struts print solid. Hole roofs are short bridges of different angles; slow the bridge speed and cool well. Files are large (up to a few hundred thousand triangles).');
@@ -619,20 +625,17 @@
       '  The joint has no spring detent or safety pin yet, so it can turn back. Do not rely on it to carry load until the joint tests in docs/SPEC.md (milestone M0) pass.',
       '  Strap mounts and the suspension cuff are not modelled yet.',
       '  The palm, fingers, thumb and link bars are the unchanged Thingiverse files by BQEducacion (CC BY-SA). The fingers are driven by fishing line and returned by elastic cord, with 1.75 mm filament as hinge pins, as described by the author; that mechanism is not part of this tool.',
-      '  The hand adapter (hand.stl) is new and untested: print it and check how the palm sits on it before relying on it. The palm is not changed to fit it.',
+      '  The hand adapter (part of palm.stl) is new and untested: print it and check how the palm sits on it before relying on it. The palm is not changed to fit it.',
       '  The printed link bars are included as spare print files but are not placed in the preview.');
     return L.join('\n');
   }
   function makeZip() {
     if (!window.JSZip) return Promise.reject({ code: 'nozip' });
     var z = new JSZip(), dir = z.folder(slug());
-    PARTS.forEach(function (n) { dir.file(n + '.stl', partSTL(n)); });
-    dir.file('assembled.stl', assembledSTL());
-    dir.file('parameters.json', settingsJSON());
-    dir.file('hand-joints.json', JSON.stringify(OPB.jointTable(current.parts[3].hand), null, 2));
-    var hf = dir.folder('hand'), files = OPB.handPrintFiles(state.side);
-    Object.keys(files).forEach(function (n) { hf.file(n, files[n]); });
-    hf.file('ATTRIBUTION.txt', OPB.HAND_ATTRIBUTION);
+    PARTS.forEach(function (n) { dir.file(FILE[n] + '.stl', partSTL(n)); });
+    var ff = dir.folder('fingers'), files = OPB.fingerFiles();
+    Object.keys(files).forEach(function (n) { ff.file(n + '.stl', files[n]); });
+    dir.file('ATTRIBUTION.txt', OPB.HAND_ATTRIBUTION);
     dir.file('README.txt', readme());
     return z.generateAsync({ type: 'blob' });
   }
@@ -642,27 +645,18 @@
     var name = slug() + '.zip';
     makeZip().then(function (blob) { return saveFile(name, blob); }).then(done(name), failed(name));
   }
-  function exportOne(n) {
-    if (!guard()) return;
-    var file = n + '.stl';
-    if (dlCap) {   // the viewer only saves a fixed list of formats, so wrap the STL in a zip
-      var zname = n + '-stl.zip';
-      if (!window.JSZip) { say('Zip support did not load.'); return; }
-      var z = new JSZip(); z.file(file, partSTL(n));
-      z.generateAsync({ type: 'blob' }).then(function (b) { return saveFile(zname, b); }).then(done(zname), failed(zname));
-    } else saveFile(file, partSTL(n)).then(done(file), failed(file));
+  // The viewer only saves a fixed list of formats, so there an STL is wrapped in a zip.
+  function saveSTL(file, data) {
+    if (!dlCap) return saveFile(file, data).then(done(file), failed(file));
+    if (!window.JSZip) { say('Zip support did not load.'); return; }
+    var zname = file.replace('.stl', '-stl.zip'), z = new JSZip(); z.file(file, data);
+    z.generateAsync({ type: 'blob' }).then(function (b) { return saveFile(zname, b); }).then(done(zname), failed(zname));
   }
-  function exportAssembled() {
+  function exportOne(n) { if (guard()) saveSTL(FILE[n] + '.stl', partSTL(n)); }
+  function exportFingers() {
     if (!guard()) return;
-    if (dlCap) {
-      if (!window.JSZip) { say('Zip support did not load.'); return; }
-      var z = new JSZip(); z.file('assembled.stl', assembledSTL());
-      z.generateAsync({ type: 'blob' }).then(function (b) { return saveFile('assembled-stl.zip', b); }).then(done('assembled-stl.zip'), failed('assembled-stl.zip'));
-    } else saveFile('assembled.stl', assembledSTL()).then(done('assembled.stl'), failed('assembled.stl'));
-  }
-  function exportJSON() {
-    var name = slug() + '.json';
-    saveFile(name, dlCap ? settingsJSON() : new Blob([settingsJSON()], { type: 'application/json' })).then(done(name), failed(name));
+    var k = fingerKey;
+    saveSTL(k === 'all' ? 'fingers.stl' : k + '-finger.stl', OPB.fingerFiles()[k]);
   }
 
   /* ------------------------------ go ------------------------------ */
